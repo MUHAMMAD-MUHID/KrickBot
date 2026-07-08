@@ -61,7 +61,6 @@ def health_check():
     }
 
 
-# --- Watermark Status ---
 @app.get("/sync/status", tags=["Update Pipeline"])
 def sync_status(db: Session = Depends(get_db)):
     """
@@ -83,3 +82,23 @@ def sync_status(db: Session = Depends(get_db)):
             for w in watermarks
         ]
     }
+
+# --- Query Pipeline ---
+
+from pydantic import BaseModel
+from app.query_pipeline.intent_router import route_query, Intent
+
+class QueryRequest(BaseModel):
+    query: str
+
+class RouteResponse(BaseModel):
+    intent: Intent
+
+@app.post("/query/route", response_model=RouteResponse, tags=["Query Pipeline"])
+def test_intent_router(request: QueryRequest):
+    """
+    Test endpoint for the Intent Router.
+    Takes a query string and returns the classified Intent (FACTUAL, EXPLANATORY, CHITCHAT).
+    """
+    intent = route_query(request.query)
+    return RouteResponse(intent=intent)

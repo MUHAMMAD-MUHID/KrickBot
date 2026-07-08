@@ -30,6 +30,12 @@ class Settings:
 
     # --- Logging ---
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
+    
+    # LLM Settings
+    LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "GEMINI")
+    GEMINI_API_KEY: str | None = os.getenv("GEMINI_API_KEY")
+    OPENAI_API_KEY: str | None = os.getenv("OPENAI_API_KEY")
+    OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 
     @property
     def DATABASE_URL(self) -> str:
