@@ -1,0 +1,13 @@
+# Web framework
+fastapi==0.115.0
+uvicorn[standard]==0.30.0
+
+# Database
+sqlalchemy==2.0.35
+pymysql==1.1.1
+
+# Configuration
+python-dotenv==1.0.1
+
+# Cryptography (needed by PyMySQL for secure connections)
+cryptography==43.0.0
