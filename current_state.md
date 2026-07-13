@@ -252,6 +252,56 @@
 |---|---|
 | `test_text_to_sql.py` | ✅ Successfully processed natural language query, ran fallback `SELECT MAX(Runs)` via SQLAlchemy, and retrieved the exact number (621). |
 
+### [2026-07-08] Task 7: RAG Retrieval
+
+**Status**: ✅ Complete
+
+#### What was done
+
+1. **Database Schema Update**
+   - Updated `scripts/create_vector_store.py` to add a `FULLTEXT INDEX` on the `content` column of the `vector_store` table.
+   - Updated `schema.sql` to include the `vector_store` table with its VECTOR and FULLTEXT types.
+
+2. **Implemented RAG Retriever Module** (`app/query_pipeline/rag_retriever.py`)
+   - Implemented `retrieve_context` using a hybrid retrieval architecture.
+   - **Vector Search (Dense)**: Computes query embeddings via `BAAI/bge-small-en-v1.5` and fetches top candidates from MariaDB using `VEC_DISTANCE_COSINE`.
+   - **Keyword Search (Sparse)**: Fetches top candidates using MariaDB's native `MATCH AGAINST` with `NATURAL LANGUAGE MODE`.
+   - **Reciprocal Rank Fusion (RRF)**: Merges Vector and Keyword candidate lists dynamically using `score = 1 / (60 + rank)` to balance semantics and exact term matching natively in Python.
+   - **Cross-Encoder Reranking**: Uses `BAAI/bge-reranker-base` to rerank the top 20 candidates and return the final top `k`.
+   - Implemented JSON extraction in the SQL queries to handle `metadata_filters` dynamically at the database level.
+
+3. **Created Validation Test** (`scripts/test_rag_retriever.py`)
+   - Wrote a test script evaluating the hybrid retriever with queries utilizing different strategies (with and without filters).
+
+#### Verification Results
+
+| Test | Result |
+|---|---|
+| `test_rag_retriever.py` | ✅ Successfully returned the dummy test document, merged scores properly with RRF, reranked output with BAAI/bge-reranker-base, and handled metadata filters flawlessly. |
+
+### [2026-07-08] Task 10: Fine-Tuning Pipeline
+
+**Status**: ✅ Complete
+
+#### What was done
+
+1. **Created Dataset Generation Script** (`scripts/generate_finetuning_dataset.py`)
+   - Queries `player` and `matches` tables from MariaDB.
+   - Formats data into a structured Question-Answer format (Instruction/Input/Output) suitable for Alpaca/ChatML fine-tuning.
+   - Successfully extracted and saved 274 synthetic instruction pairs to `dataset.jsonl`.
+
+2. **Created Google Colab Fine-Tuning Notebook** (`colab_finetuning_pipeline.ipynb`)
+   - Wrote a self-contained Jupyter notebook to fine-tune `Llama-3-8B-Instruct` directly in Google Colab's free T4 GPU tier.
+   - Uses **Unsloth** for 2x faster, memory-efficient 4-bit QLoRA fine-tuning.
+   - Includes data formatting functions for the `dataset.jsonl` file.
+   - Exports the fine-tuned model into GGUF format for easy local inference with Llama.cpp or Ollama.
+
+#### Verification Results
+
+| Test | Result |
+|---|---|
+| Dataset Script | ✅ Successfully connected to DB and generated 274 properly formatted JSONL pairs. |
+
 ---
 
 ## Current File Structure
@@ -276,7 +326,7 @@ KrickBot/
 │   │   ├── __init__.py
 │   │   ├── intent_router.py        # Classifies query into FACTUAL/EXPLANATORY/CHITCHAT
 │   │   ├── text_to_sql.py          # Generates and executes safe SQL via LLM
-│   │   ├── rag_retriever.py        # [PLACEHOLDER] Task 7
+│   │   ├── rag_retriever.py        # Hybrid Vector + Keyword RAG retrieval with Cross-Encoder reranking
 │   │   └── response_generator.py   # [PLACEHOLDER] Task 8
 │   └── utils/
 │       ├── __init__.py
@@ -284,6 +334,7 @@ KrickBot/
 ├── scripts/
 │   ├── create_sync_state.py        # Migration: create & seed sync_state table
 │   ├── create_vector_store.py      # Migration: create vector_store table
+│   ├── generate_finetuning_dataset.py # Generates dataset.jsonl for Colab fine-tuning
 │   ├── run_update_pipeline.py      # Main orchestrator (runs doc gen loop)
 │   ├── test_doc_generator.py       # Test script for extraction/generation
 │   ├── test_intent_router.py       # Test script for classification logic
@@ -293,6 +344,8 @@ KrickBot/
 │   └── __init__.py
 ├── .env                            # Environment variables (has DB password)
 ├── .env.example                    # Template for .env
+├── dataset.jsonl                   # Fine-tuning dataset (generated)
+├── colab_finetuning_pipeline.ipynb # Google Colab notebook for LLM fine-tuning
 ├── requirements.txt                # Python dependencies
 ├── current_state.md                # THIS FILE — change history
 ├── README.md                       # Project overview
@@ -312,8 +365,8 @@ KrickBot/
 | Task 4 | Vector Database Setup — MariaDB VECTOR columns, metadata schema | ✅ Complete |
 | Task 5 | Intent Router — factual vs explanatory classification | ✅ Complete |
 | Task 6 | Text-to-SQL — schema-aware SQL generation with safeguards | ✅ Complete |
-| Task 7 | RAG Retrieval — hybrid search + metadata filtering + reranking | 🔜 Next |
+| Task 7 | RAG Retrieval — hybrid search + metadata filtering + reranking | ✅ Complete |
 | Task 8 | Response Generation — wire context into fine-tuned LLM | Pending |
 | Task 9 | Self-Check (optional) — validate numeric claims before responding | Pending |
-| Task 10 | Fine-Tuning Pipeline — offline LLM training process | Pending |
+| Task 10 | Fine-Tuning Pipeline — offline LLM training process | ✅ Complete |
 | Task 11 | Testing — idempotency tests, accuracy evaluation | Pending |
