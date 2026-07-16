@@ -32,7 +32,8 @@ class Settings:
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
     
     # LLM Settings
-    LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "GEMINI")
+    LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "GROQ")
+    GROQ_API_KEY: str | None = os.getenv("GROQ_API_KEY")
     GEMINI_API_KEY: str | None = os.getenv("GEMINI_API_KEY")
     OPENAI_API_KEY: str | None = os.getenv("OPENAI_API_KEY")
     OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")

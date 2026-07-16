@@ -83,19 +83,56 @@ class IntentRouter:
 
 class LLMIntentRouter:
     """
-    Stub for the future LLM-based router.
-    To be implemented once LLM provider is chosen.
+    LLM-based router using Groq API to classify incoming queries.
     """
     def __init__(self, api_key: str = None):
-        self.api_key = api_key
+        from groq import Groq
+        from app.config import settings
+        self.api_key = api_key or settings.GROQ_API_KEY
+        self.client = Groq(api_key=self.api_key) if self.api_key else None
         
     def route(self, query: str) -> Intent:
-        # TODO: Send query to LLM with a 0-shot prompt:
-        # "Classify the following cricket question into FACTUAL, EXPLANATORY, or CHITCHAT: {query}"
-        raise NotImplementedError("LLM router not yet implemented")
+        if not self.client:
+            logger.warning("Groq API key missing. Falling back to rule-based router.")
+            return IntentRouter().route(query)
+            
+        system_prompt = (
+            "You are an intent classification system for a cricket chatbot. "
+            "Classify the following query into exactly one of these three categories:\n"
+            "1. FACTUAL: Queries asking for exact numbers, stats, scores, dates, or database lookups.\n"
+            "2. EXPLANATORY: Queries asking for context, narratives, comparisons, rules, or 'why/how' questions.\n"
+            "3. CHITCHAT: Greetings or general conversation.\n"
+            "Respond ONLY with the category name (FACTUAL, EXPLANATORY, or CHITCHAT) and nothing else."
+        )
+        
+        try:
+            completion = self.client.chat.completions.create(
+                model="llama-3.1-8b-instant",
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": f"Query: {query}"}
+                ],
+                temperature=0.0,
+                max_tokens=10,
+            )
+            result = completion.choices[0].message.content.strip().upper()
+            
+            if "FACTUAL" in result:
+                return Intent.FACTUAL
+            elif "EXPLANATORY" in result:
+                return Intent.EXPLANATORY
+            elif "CHITCHAT" in result:
+                return Intent.CHITCHAT
+            else:
+                logger.warning(f"Unexpected LLM output '{result}'. Defaulting to FACTUAL.")
+                return Intent.FACTUAL
+        except Exception as e:
+            logger.error(f"Groq routing error: {str(e)}. Falling back to rule-based router.")
+            return IntentRouter().route(query)
 
 # Global instance of the active router
-router = IntentRouter()
+# Switch to LLMIntentRouter now that Groq is available
+router = LLMIntentRouter()
 
 def route_query(query: str) -> Intent:
     """Convenience function to route a query."""

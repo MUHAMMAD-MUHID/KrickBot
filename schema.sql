@@ -139,7 +139,8 @@ CREATE TABLE `ball_by_ball` (
   `ShotType` int(11) NOT NULL DEFAULT 0,
   `BatsmanName` varchar(100) DEFAULT NULL,
   `BowlerName` varchar(100) DEFAULT NULL,
-  PRIMARY KEY (`BallId`)
+  PRIMARY KEY (`BallId`),
+  KEY `idx_ballbyball_h2h` (`MatchNo`,`BatsmanId`,`BowlerId`)
 ) ENGINE=InnoDB AUTO_INCREMENT=37873 DEFAULT CHARSET=latin1 COLLATE=latin1_swedish_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -178,6 +179,7 @@ CREATE TABLE `batting_detail` (
   `MatchType` varchar(1) DEFAULT NULL,
   PRIMARY KEY (`MatchNo`,`Innings`,`PlayerId`),
   KEY `batting_player_fkey` (`PlayerId`) USING BTREE,
+  KEY `idx_batting_player_match` (`PlayerId`,`MatchNo`),
   CONSTRAINT `FK_batting_detail_innings` FOREIGN KEY (`MatchNo`, `Innings`) REFERENCES `innings` (`MatchNo`, `Innings`),
   CONSTRAINT `FK_batting_detail_player` FOREIGN KEY (`PlayerId`) REFERENCES `player` (`PlayerId`)
 ) ENGINE=InnoDB DEFAULT CHARSET=latin1 COLLATE=latin1_swedish_ci;
@@ -245,6 +247,7 @@ CREATE TABLE `bowling_detail` (
   `Balls` int(11) DEFAULT NULL,
   PRIMARY KEY (`MatchNo`,`Innings`,`PlayerId`),
   KEY `bowling_player_fkey` (`PlayerId`) USING BTREE,
+  KEY `idx_bowling_player_match` (`PlayerId`,`MatchNo`),
   CONSTRAINT `FK_bowling_detail_innings` FOREIGN KEY (`MatchNo`, `Innings`) REFERENCES `innings` (`MatchNo`, `Innings`),
   CONSTRAINT `FK_bowling_detail_player` FOREIGN KEY (`PlayerId`) REFERENCES `player` (`PlayerId`)
 ) ENGINE=InnoDB DEFAULT CHARSET=latin1 COLLATE=latin1_swedish_ci;
@@ -398,14 +401,16 @@ CREATE TABLE `club` (
   `ShortName` varchar(10) NOT NULL,
   `Captain` int(11) DEFAULT NULL,
   `CCA` int(11) DEFAULT NULL,
-  `countryid` int(11) DEFAULT NULL,
-  `cityid` int(11) DEFAULT NULL,
-  `city` varchar(50) DEFAULT NULL,
-  `country` varchar(30) DEFAULT NULL,
+  `CityId` int(11) DEFAULT NULL,
+  `CountryId` int(11) DEFAULT NULL,
   PRIMARY KEY (`ClubId`),
   KEY `FK_club_association` (`AssociationId`),
+  KEY `FK_club_city` (`CityId`),
+  KEY `FK_club_country` (`CountryId`),
   FULLTEXT KEY `idx_clubname` (`ClubName`),
-  CONSTRAINT `FK_club_association` FOREIGN KEY (`AssociationId`) REFERENCES `association` (`AssociationId`)
+  CONSTRAINT `FK_club_association` FOREIGN KEY (`AssociationId`) REFERENCES `association` (`AssociationId`),
+  CONSTRAINT `FK_club_city` FOREIGN KEY (`CityId`) REFERENCES `city` (`CityId`),
+  CONSTRAINT `FK_club_country` FOREIGN KEY (`CountryId`) REFERENCES `country` (`CountryCode`)
 ) ENGINE=InnoDB AUTO_INCREMENT=2841 DEFAULT CHARSET=latin1 COLLATE=latin1_swedish_ci ROW_FORMAT=DYNAMIC;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -1446,7 +1451,7 @@ DROP TABLE IF EXISTS `player`;
 CREATE TABLE `player` (
   `PlayerId` int(11) NOT NULL AUTO_INCREMENT,
   `FullName` varchar(100) DEFAULT ' ',
-  `DOB` date DEFAULT '0000-00-00',
+  `DOB` date DEFAULT NULL,
   `MajorTeams` varchar(100) DEFAULT ' ',
   `BattingStyle` varchar(50) DEFAULT ' ',
   `BowlingStyle` varchar(50) DEFAULT ' ',
@@ -1469,12 +1474,12 @@ CREATE TABLE `player` (
   `PHoneNo` varchar(20) DEFAULT NULL,
   `CityId` int(11) DEFAULT NULL,
   `CountryId` int(11) DEFAULT NULL,
-  `City` varchar(50) DEFAULT NULL,
-  `Country` varchar(30) DEFAULT NULL,
   PRIMARY KEY (`PlayerId`),
   KEY `FK_player_club` (`ClubId`),
   KEY `idx_player_name` (`FullName`),
-  CONSTRAINT `FK_player_club` FOREIGN KEY (`ClubId`) REFERENCES `club` (`ClubId`)
+  CONSTRAINT `FK_player_club` FOREIGN KEY (`ClubId`) REFERENCES `club` (`ClubId`),
+  CONSTRAINT `FK_player_city` FOREIGN KEY (`CityId`) REFERENCES `city` (`CityId`),
+  CONSTRAINT `FK_player_country` FOREIGN KEY (`CountryId`) REFERENCES `country` (`CountryCode`)
 ) ENGINE=InnoDB AUTO_INCREMENT=18956 DEFAULT CHARSET=latin1 COLLATE=latin1_swedish_ci ROW_FORMAT=DYNAMIC;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -2035,3 +2040,137 @@ CREATE TABLE `users` (
 /*M!100616 SET NOTE_VERBOSITY=@OLD_NOTE_VERBOSITY */;
 
 -- Dump completed on 2026-07-07 15:33:48
+
+--
+-- Phase 2: Clean Views for LLM Dataset Generation
+--
+
+-- View for cleanly formatted players
+DROP VIEW IF EXISTS `v_clean_player`;
+CREATE VIEW `v_clean_player` AS
+SELECT 
+    p.`PlayerId`,
+    TRIM(p.`FullName`) AS `PlayerName`,
+    TRIM(p.`ShortName`) AS `ShortName`,
+    CASE WHEN p.`DOB` = '0000-00-00' OR p.`DOB` IS NULL THEN 'Not Available' ELSE DATE_FORMAT(p.`DOB`, '%Y-%m-%d') END AS `DateOfBirth`,
+    TRIM(p.`BattingStyle`) AS `BattingStyle`,
+    TRIM(p.`BowlingStyle`) AS `BowlingStyle`,
+    TRIM(p.`PlayingRole`) AS `PlayingRole`,
+    c.`ClubName`,
+    ci.`CityName`,
+    co.`CountryName`
+FROM 
+    `player` p
+LEFT JOIN `club` c ON p.`ClubId` = c.`ClubId`
+LEFT JOIN `city` ci ON p.`CityId` = ci.`CityId`
+LEFT JOIN `country` co ON p.`CountryId` = co.`CountryCode`;
+
+-- View for cleanly formatted clubs
+DROP VIEW IF EXISTS `v_clean_club`;
+CREATE VIEW `v_clean_club` AS
+SELECT
+    c.`ClubId`,
+    TRIM(c.`ClubName`) AS `ClubName`,
+    TRIM(c.`President`) AS `President`,
+    TRIM(c.`Coach`) AS `Coach`,
+    a.`AssociationName`,
+    ci.`CityName`,
+    co.`CountryName`
+FROM
+    `club` c
+LEFT JOIN `association` a ON c.`AssociationId` = a.`AssociationId`
+LEFT JOIN `city` ci ON c.`CityId` = ci.`CityId`
+LEFT JOIN `country` co ON c.`CountryId` = co.`CountryCode`;
+
+--
+-- Phase 3: Analytics and Feature Engineering Views
+--
+
+-- 1. Career Batting Stats
+DROP VIEW IF EXISTS `v_player_career_batting`;
+CREATE VIEW `v_player_career_batting` AS
+SELECT 
+    `PlayerId`,
+    COUNT(`Innings`) AS `TotalInnings`,
+    SUM(`Runs`) AS `TotalRuns`,
+    MAX(`Runs`) AS `HighestScore`,
+    SUM(`BallsFaced`) AS `TotalBallsFaced`,
+    SUM(`NotOut`) AS `TotalNotOuts`,
+    ROUND(SUM(`Runs`) / NULLIF((COUNT(`Innings`) - SUM(`NotOut`)), 0), 2) AS `BattingAverage`,
+    ROUND((SUM(`Runs`) / NULLIF(SUM(`BallsFaced`), 0)) * 100, 2) AS `StrikeRate`,
+    SUM(CASE WHEN `Runs` >= 100 THEN 1 ELSE 0 END) AS `Hundreds`,
+    SUM(CASE WHEN `Runs` >= 50 AND `Runs` < 100 THEN 1 ELSE 0 END) AS `Fifties`
+FROM `batting_detail`
+GROUP BY `PlayerId`;
+
+-- 2. Career Bowling Stats
+DROP VIEW IF EXISTS `v_player_career_bowling`;
+CREATE VIEW `v_player_career_bowling` AS
+SELECT 
+    `PlayerId`,
+    COUNT(`Innings`) AS `TotalInningsBowled`,
+    SUM(`Wickets`) AS `TotalWickets`,
+    SUM(`Runs`) AS `TotalRunsConceded`,
+    SUM(`Overs`) AS `TotalOversBowled`,
+    ROUND(SUM(`Runs`) / NULLIF(SUM(`Wickets`), 0), 2) AS `BowlingAverage`,
+    ROUND(SUM(`Runs`) / NULLIF(SUM(`Overs`), 0), 2) AS `EconomyRate`,
+    SUM(CASE WHEN `Wickets` >= 5 THEN 1 ELSE 0 END) AS `FiveWicketHauls`
+FROM `bowling_detail`
+GROUP BY `PlayerId`;
+
+-- 3. Recent Batting Form (Last 5 Innings)
+DROP VIEW IF EXISTS `v_player_recent_batting`;
+CREATE VIEW `v_player_recent_batting` AS
+SELECT 
+    `PlayerId`,
+    SUM(`Runs`) AS `RecentRuns`,
+    SUM(`BallsFaced`) AS `RecentBallsFaced`,
+    ROUND(SUM(`Runs`) / NULLIF((COUNT(`Innings`) - SUM(`NotOut`)), 0), 2) AS `RecentAverage`,
+    ROUND((SUM(`Runs`) / NULLIF(SUM(`BallsFaced`), 0)) * 100, 2) AS `RecentStrikeRate`
+FROM (
+    SELECT 
+        `PlayerId`, 
+        `Runs`, 
+        `BallsFaced`, 
+        `NotOut`, 
+        `Innings`,
+        ROW_NUMBER() OVER(PARTITION BY `PlayerId` ORDER BY `MatchNo` DESC) as `rn`
+    FROM `batting_detail`
+) t
+WHERE t.`rn` <= 5
+GROUP BY `PlayerId`;
+
+-- 4. Recent Bowling Form (Last 5 Innings)
+DROP VIEW IF EXISTS `v_player_recent_bowling`;
+CREATE VIEW `v_player_recent_bowling` AS
+SELECT 
+    `PlayerId`,
+    SUM(`Wickets`) AS `RecentWickets`,
+    SUM(`Runs`) AS `RecentRunsConceded`,
+    SUM(`Overs`) AS `RecentOversBowled`,
+    ROUND(SUM(`Runs`) / NULLIF(SUM(`Wickets`), 0), 2) AS `RecentBowlingAverage`,
+    ROUND(SUM(`Runs`) / NULLIF(SUM(`Overs`), 0), 2) AS `RecentEconomyRate`
+FROM (
+    SELECT 
+        `PlayerId`, 
+        `Wickets`, 
+        `Runs`, 
+        `Overs`,
+        ROW_NUMBER() OVER(PARTITION BY `PlayerId` ORDER BY `MatchNo` DESC) as `rn`
+    FROM `bowling_detail`
+) t
+WHERE t.`rn` <= 5
+GROUP BY `PlayerId`;
+
+-- 5. Batsman vs Bowler Head-to-Head
+DROP VIEW IF EXISTS `v_batsman_vs_bowler_h2h`;
+CREATE VIEW `v_batsman_vs_bowler_h2h` AS
+SELECT 
+    `BatsmanId`,
+    `BowlerId`,
+    SUM(`Runs`) AS `RunsScored`,
+    COUNT(`BallId`) AS `BallsFaced`,
+    ROUND((SUM(`Runs`) / NULLIF(COUNT(`BallId`), 0)) * 100, 2) AS `StrikeRate`,
+    SUM(`Wicket`) AS `TimesDismissed`
+FROM `ball_by_ball`
+GROUP BY `BatsmanId`, `BowlerId`;
