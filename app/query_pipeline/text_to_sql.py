@@ -1,100 +1,341 @@
 """
-Text-to-SQL Module (Local Open-Source version)
+Text-to-SQL Module (Groq version)
 
 Takes a FACTUAL user query, converts it into a MariaDB SQL query using
-the local `defog/sqlcoder-7b-2` model via Hugging Face, validates it, 
-executes it, and returns the result.
+Groq, validates it, executes it, and returns the result.
 """
 
 import os
 import re
-import torch
 from sqlalchemy import text
 from app.utils.logger import get_logger
 from app.database import SessionLocal
-from transformers import AutoTokenizer, AutoModelForCausalLM
+from app.config import settings
+from groq import Groq
 
 logger = get_logger(__name__)
 
-# Global variables to hold the model in memory
-_tokenizer = None
-_model = None
-MODEL_ID = "defog/sqlcoder-7b-2"
-
-def load_sql_model():
-    """
-    Lazily loads the SQLCoder model into memory.
-    This prevents the 14GB model from loading immediately when the API starts.
-    """
-    global _tokenizer, _model
-    if _model is None:
-        logger.info(f"Loading {MODEL_ID} into memory. This may take a moment and requires ~14GB RAM/VRAM...")
-        
-        # device_map="auto" automatically splits the model between GPU and CPU RAM if needed
-        _tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
-        _model = AutoModelForCausalLM.from_pretrained(
-            MODEL_ID,
-            torch_dtype=torch.float16,
-            device_map="auto",
-        )
-        logger.info("[OK] SQLCoder model loaded successfully.")
-
 # SQLCoder has a very strict prompt template. We must adhere to it exactly.
-SCHEMA_CONTEXT = """CREATE TABLE player (
-  PlayerId INT,
-  FirstName VARCHAR(255),
-  LastName VARCHAR(255),
-  DOB DATE,
-  BattingStyle VARCHAR(50),
-  BowlingStyle VARCHAR(50)
+SCHEMA_CONTEXT = """CREATE TABLE article (
+  ArticleId int
 );
 
-CREATE TABLE matches (
-  MatchId INT,
-  Title VARCHAR(255),
-  MatchDate DATE,
-  Format VARCHAR(50),
-  Venue VARCHAR(255),
-  Team1Id INT,
-  Team2Id INT,
-  WinnerId INT,
-  TossWonBy INT
+CREATE TABLE article_group (
+  GroupId int
+);
+
+CREATE TABLE article_tags (
+  ID int
+);
+
+CREATE TABLE association (
+  AssociationId int
+);
+
+CREATE TABLE ball_by_ball (
+  BallId int
 );
 
 CREATE TABLE batting_detail (
-  MatchId INT,
-  PlayerId INT,
-  Runs INT,
-  Balls INT,
-  Fours INT,
-  Sixes INT,
-  DismissalType VARCHAR(50),
-  TeamId INT
+  MatchNo int
+);
+
+CREATE TABLE batting_stats (
+  PlayerId int
 );
 
 CREATE TABLE bowling_detail (
-  MatchId INT,
-  PlayerId INT,
-  Overs FLOAT,
-  Maidens INT,
-  Runs INT,
-  Wickets INT,
-  Wides INT,
-  NoBalls INT,
-  TeamId INT
+  MatchNo int
 );
 
-CREATE TABLE tournament (
-  TournamentId INT,
-  Name VARCHAR(255),
-  Year INT,
-  Format VARCHAR(50)
+CREATE TABLE bowling_stats (
+  PlayerId int
+);
+
+CREATE TABLE budget (
+  Id int
+);
+
+CREATE TABLE category (
+  CatId int
+);
+
+CREATE TABLE city (
+  CityId int
+);
+
+CREATE TABLE city_cricket_association (
+  CCAId int
+);
+
+CREATE TABLE club (
+  ClubId int
+);
+
+CREATE TABLE comment (
+  CommentId int
+);
+
+CREATE TABLE country (
+  CountryName varchar
+);
+
+CREATE TABLE cricket_association (
+  CAId int
+);
+
+CREATE TABLE current_day (
+  FinDay date,
+  Current tinyint
+);
+
+CREATE TABLE department (
+  DepartmentId int
+);
+
+CREATE TABLE edition (
+  EditionId int
+);
+
+CREATE TABLE event (
+  EventId int
+);
+
+CREATE TABLE fantasy_prediction (
+  ID int
+);
+
+CREATE TABLE fantasy_result (
+  ID int
+);
+
+CREATE TABLE fantasy_user (
+  FUserId int
+);
+
+CREATE TABLE feedback (
+  Id int
+);
+
+CREATE TABLE fow (
+  MatchNo int
+);
+
+CREATE TABLE gallery (
+  GalleryId int
+);
+
+CREATE TABLE ground (
+  GroundId int
+);
+
+CREATE TABLE group (
+  GroupId int
+);
+
+CREATE TABLE group_screen (
+  ScreenId int
+);
+
+CREATE TABLE innings (
+  MatchNo int
+);
+
+CREATE TABLE inreport (
+  ReportId int
+);
+
+CREATE TABLE live_ball_by_ball (
+  BallId bigint
+);
+
+CREATE TABLE live_batting_detail (
+  MatchNo int
+);
+
+CREATE TABLE live_bowling_detail (
+  MatchNo int
+);
+
+CREATE TABLE live_fow (
+  MatchNo int
+);
+
+CREATE TABLE live_innings (
+  MatchNo int
+);
+
+CREATE TABLE live_match_over (
+  MatchNo int
+);
+
+CREATE TABLE live_match_squad (
+  TeamId int
+);
+
+CREATE TABLE live_matches (
+  MatchNo int
+);
+
+CREATE TABLE livescore (
+  Id datetime,
+  Team1 varchar
+);
+
+CREATE TABLE match_comments (
+  CommentId int
+);
+
+CREATE TABLE match_over (
+  MatchNo int
+);
+
+CREATE TABLE match_squad (
+  TeamId int
+);
+
+CREATE TABLE matches (
+  MatchNo int
+);
+
+CREATE TABLE media_item (
+  ItemId int
+);
+
+CREATE TABLE news (
+  NewsId int
+);
+
+CREATE TABLE object_pics (
+  ID int
+);
+
+CREATE TABLE offer (
+  OfferId int
+);
+
+CREATE TABLE official (
+  Id int
+);
+
+CREATE TABLE outreport (
+  ReportId int
+);
+
+CREATE TABLE outreport_data (
+  Id int
+);
+
+CREATE TABLE photo (
+  PhotoId int
+);
+
+CREATE TABLE player (
+  PlayerId int
+);
+
+CREATE TABLE player_follower (
+  PlayerId int
+);
+
+CREATE TABLE point_table (
+  TournamentId int
+);
+
+CREATE TABLE points (
+  TournamentId int
+);
+
+CREATE TABLE posts (
+  PostId int
+);
+
+CREATE TABLE province (
+  ProvinceId int
+);
+
+CREATE TABLE recover_your_data (
+  text varchar
+);
+
+CREATE TABLE region (
+  RegionId int
+);
+
+CREATE TABLE round_team (
+  RoundTeamId int
+);
+
+CREATE TABLE scorer (
+  ScorerId int
+);
+
+CREATE TABLE scorer_setup_sync_event (
+  ClientEventId varchar
+);
+
+CREATE TABLE scorer_tournament (
+  ScorerId int
+);
+
+CREATE TABLE screen (
+  ScreenId int
+);
+
+CREATE TABLE season (
+  Season varchar
+);
+
+CREATE TABLE section (
+  SectionId int
+);
+
+CREATE TABLE section_head (
+  HeadId int
+);
+
+CREATE TABLE squad (
+  TeamId int
+);
+
+CREATE TABLE sw_user (
+  UserId int
+);
+
+CREATE TABLE tags (
+  TagId int
 );
 
 CREATE TABLE team (
-  TeamId INT,
-  Name VARCHAR(255),
-  ShortName VARCHAR(50)
+  TeamId int
+);
+
+CREATE TABLE temp (
+  ArticleId int
+);
+
+CREATE TABLE test_table (
+  id int
+);
+
+CREATE TABLE tournament (
+  TournamentId int
+);
+
+CREATE TABLE tournament_club (
+  TournamentId int
+);
+
+CREATE TABLE tournament_round (
+  RoundId int
+);
+
+CREATE TABLE user_group (
+  GroupId int
+);
+
+CREATE TABLE users (
+  UserId int
 );
 """
 
@@ -119,31 +360,28 @@ Given the database schema, here is the SQL query that answers [QUESTION]{user_qu
 
 def generate_sql(query: str) -> str:
     """
-    Calls the local SQLCoder model to convert a natural language query into SQL.
+    Calls Groq API to convert a natural language query into SQL.
     """
     try:
-        load_sql_model()
-        
-        prompt = build_prompt(query)
-        inputs = _tokenizer(prompt, return_tensors="pt").to(_model.device)
-        
         logger.debug(f"Generating SQL for: {query}")
+        client = Groq(api_key=settings.GROQ_API_KEY) if settings.GROQ_API_KEY else None
+        if not client:
+             logger.error("Groq API key not found. Cannot generate SQL.")
+             return ""
+             
+        prompt = build_prompt(query)
         
-        # Generate the SQL output
-        generated_ids = _model.generate(
-            **inputs,
-            max_new_tokens=256,
-            do_sample=False,  # Deterministic output for SQL
-            num_beams=1,
-            eos_token_id=_tokenizer.eos_token_id,
-            pad_token_id=_tokenizer.eos_token_id
+        completion = client.chat.completions.create(
+            model="llama-3.1-8b-instant",
+            messages=[
+                {"role": "system", "content": "You are a specialized SQL expert. Output ONLY valid SQL queries based on the prompt."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.0,
+            max_tokens=256,
         )
         
-        # Decode only the newly generated tokens (ignoring the massive prompt)
-        generated_query = _tokenizer.decode(
-            generated_ids[0][inputs["input_ids"].shape[1]:], 
-            skip_special_tokens=True
-        )
+        generated_query = completion.choices[0].message.content
         
         # Clean up the response (extract just the query if it includes markdown)
         sql = generated_query.split("[/SQL]")[0].strip()
@@ -151,13 +389,16 @@ def generate_sql(query: str) -> str:
         sql = re.sub(r'^```\s*', '', sql)
         sql = re.sub(r'```$', '', sql)
         
+        # Strip trailing semicolon so we can safely append LIMIT
+        sql = sql.rstrip().rstrip(";")
+        
         # Limit to 10 rows safely
         if "LIMIT " not in sql.upper():
             sql += " LIMIT 10"
             
         return sql.strip()
     except Exception as e:
-        logger.error(f"Error calling local SQLCoder: {str(e)}")
+        logger.error(f"Error calling Groq for SQL: {str(e)}")
         # For testing purposes if VRAM crashes:
         if "highest score" in query.lower():
              logger.warning("Falling back to test query due to model error.")

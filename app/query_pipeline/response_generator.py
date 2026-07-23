@@ -24,15 +24,17 @@ def generate_response(query: str, context: str, intent: str = "FACTUAL") -> str:
     system_prompt = (
         "You are KrickBot, an analytical cricket assistant. "
         "Answer the user's question using ONLY the provided context/facts. "
-        "Write naturally and avoid robotic repetition."
+        "Write naturally and avoid robotic repetition. "
+        "Use rich Markdown formatting for your responses. When providing statistics or comparisons, "
+        "always use bullet points or Markdown tables to make the data easy to read."
     )
     
     if intent == "FACTUAL":
         system_prompt += " The context contains database SQL query results."
     elif intent == "EXPLANATORY":
-        system_prompt += " The context contains retrieved documents."
+        system_prompt += " The context contains retrieved documents. If the context says RAG is not implemented, use your general cricket knowledge to answer."
     elif intent == "CHITCHAT":
-        system_prompt = "You are KrickBot, a friendly cricket chatbot. Keep your answers brief and conversational."
+        system_prompt = "You are KrickBot, a friendly cricket chatbot. Keep your answers brief and conversational. Never make up facts about people or sports."
         
     try:
         completion = client.chat.completions.create(
@@ -42,7 +44,7 @@ def generate_response(query: str, context: str, intent: str = "FACTUAL") -> str:
                 {"role": "user", "content": f"Context:\n{context}\n\nQuestion: {query}"}
             ],
             temperature=0.7,
-            max_tokens=512,
+            max_tokens=1024,
         )
         return completion.choices[0].message.content
     except Exception as e:

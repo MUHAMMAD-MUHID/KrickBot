@@ -100,8 +100,8 @@ class LLMIntentRouter:
             "You are an intent classification system for a cricket chatbot. "
             "Classify the following query into exactly one of these three categories:\n"
             "1. FACTUAL: Queries asking for exact numbers, stats, scores, dates, or database lookups.\n"
-            "2. EXPLANATORY: Queries asking for context, narratives, comparisons, rules, or 'why/how' questions.\n"
-            "3. CHITCHAT: Greetings or general conversation.\n"
+            "2. EXPLANATORY: Queries asking for context, narratives, comparisons, rules, 'who is', or 'why/how' questions.\n"
+            "3. CHITCHAT: Greetings or general conversation ONLY. If the query contains a greeting PLUS a substantive question (e.g., 'hello who is...'), classify it as EXPLANATORY or FACTUAL based on the question.\n"
             "Respond ONLY with the category name (FACTUAL, EXPLANATORY, or CHITCHAT) and nothing else."
         )
         

@@ -19,17 +19,10 @@ from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-# --- App Instance ---
-app = FastAPI(
-    title="KrickBot",
-    description="AI-Powered Cricket Analytics Chatbot API",
-    version="0.1.0",
-)
+from contextlib import asynccontextmanager
 
-
-# --- Startup Event ---
-@app.on_event("startup")
-def on_startup():
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     """
     Runs once when the server starts.
     Verifies that MariaDB is reachable. Logs a clear error if not.
@@ -42,6 +35,15 @@ def on_startup():
             "[FAIL] Cannot connect to MariaDB. Check .env settings and ensure "
             "MariaDB is running on the configured host/port."
         )
+    yield
+
+# --- App Instance ---
+app = FastAPI(
+    title="KrickBot",
+    description="AI-Powered Cricket Analytics Chatbot API",
+    version="0.1.0",
+    lifespan=lifespan,
+)
 
 
 # --- Health Check ---
