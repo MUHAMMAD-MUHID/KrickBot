@@ -19,7 +19,7 @@ from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-# --- Engine ---
+# --- Main Database (MariaDB) ---
 # pool_size=5: keep 5 connections ready (enough for API + update pipeline)
 # max_overflow=10: allow up to 10 extra connections under burst load
 # pool_recycle=3600: recycle connections every hour to avoid MariaDB's wait_timeout
@@ -31,11 +31,23 @@ engine = create_engine(
     echo=False,  # Set to True to log all SQL (very verbose, use for debugging only)
 )
 
-# --- Session Factory ---
-# autocommit=False: we explicitly commit transactions
-# autoflush=False: we control when SQLAlchemy flushes to DB (avoids surprise queries)
 SessionLocal = sessionmaker(
     bind=engine,
+    autocommit=False,
+    autoflush=False,
+)
+
+# --- Chat Database (PostgreSQL) ---
+chat_engine = create_engine(
+    settings.CHAT_DATABASE_URL,
+    pool_size=5,
+    max_overflow=10,
+    pool_pre_ping=True, # Verify connection is alive before using
+    echo=False,
+)
+
+ChatSessionLocal = sessionmaker(
+    bind=chat_engine,
     autocommit=False,
     autoflush=False,
 )
@@ -43,21 +55,24 @@ SessionLocal = sessionmaker(
 # --- Declarative Base ---
 # All ORM models inherit from this base class
 Base = declarative_base()
+ChatBase = declarative_base()
 
 
 def get_db() -> Session:
     """
-    FastAPI dependency that provides a database session.
-
-    Usage in a route:
-        @app.get("/example")
-        def example(db: Session = Depends(get_db)):
-            ...
-
-    The session is automatically closed after the request completes,
-    even if an exception occurs (finally block).
+    FastAPI dependency that provides a main database session (MariaDB).
     """
     db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+def get_chat_db() -> Session:
+    """
+    FastAPI dependency that provides a chat database session (PostgreSQL).
+    """
+    db = ChatSessionLocal()
     try:
         yield db
     finally:

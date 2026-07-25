@@ -245,7 +245,7 @@ SCHEMA_NOTES = """
 - CRITICAL: NEVER JOIN batting_stats with bowling_stats — they share column names (PlayerName, Runs, Season) causing ambiguity errors. Query them separately.
 - If the user asks about a player's "stats" or "achievements" without specifying batting or bowling, query batting_stats ONLY (batting is the default).
 - If the user asks specifically about bowling/wickets, query bowling_stats ONLY.
-- Use LIKE '%name%' for player name searches since names may not match exactly.
+- Use LIKE '%name%' for player name searches since names may not match exactly. Correct obvious misspellings of famous players (e.g. 'baber azam' -> 'Babar Azam') before putting them in the LIKE clause.
 
 ### Example Queries:
 Q: "Who won the most matches in 2019?"

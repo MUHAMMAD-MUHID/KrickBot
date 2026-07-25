@@ -11,9 +11,9 @@ Start the server with:
     uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 """
 
-from fastapi import FastAPI, Depends
+from fastapi import FastAPI, Depends, HTTPException
 from sqlalchemy.orm import Session
-from app.database import get_db, check_db_connection
+from app.database import get_db, get_chat_db, check_db_connection
 from app.update_pipeline.watermark import get_all_watermarks
 from app.utils.logger import get_logger
 
@@ -109,6 +109,7 @@ app.add_middleware(
 
 class QueryRequest(BaseModel):
     query: str
+    session_id: str | None = None
 
 class RouteResponse(BaseModel):
     intent: Intent
@@ -116,7 +117,26 @@ class RouteResponse(BaseModel):
 class ChatResponse(BaseModel):
     response: str
     intent: Intent
+    session_id: str
     context: str | None = None
+
+class ChatMessageResponse(BaseModel):
+    id: str | None = None
+    role: str
+    content: str
+    intent: str | None
+    created_at: str
+
+class ChatHistoryResponse(BaseModel):
+    session_id: str
+    messages: list[ChatMessageResponse]
+
+class ChatSessionPreview(BaseModel):
+    id: str
+    preview: str
+    updated_at: str
+
+from app.models.chat import ChatSession, ChatMessage
 
 @app.post("/query/route", response_model=RouteResponse, tags=["Query Pipeline"])
 def test_intent_router(request: QueryRequest):
@@ -128,15 +148,39 @@ def test_intent_router(request: QueryRequest):
     return RouteResponse(intent=intent)
 
 @app.post("/chat", response_model=ChatResponse, tags=["Query Pipeline"])
-def chat_endpoint(request: QueryRequest):
+def chat_endpoint(request: QueryRequest, chat_db: Session = Depends(get_chat_db)):
     """
     Main Chat API.
 
     Routes the user query, fetches data via the appropriate pipeline,
     formats it through context_formatter (stripping all SQL/implementation
-    details), and generates a KrickBot-style analyst response.
+    details), generates a KrickBot-style analyst response, and saves the
+    interaction to the PostgreSQL chat history.
     """
     query = request.query
+    session_id = request.session_id
+
+    # Session management
+    chat_session = None
+    if session_id:
+        chat_session = chat_db.query(ChatSession).filter(ChatSession.id == session_id).first()
+    
+    if not chat_session:
+        chat_session = ChatSession()
+        chat_db.add(chat_session)
+        chat_db.commit()
+        chat_db.refresh(chat_session)
+    
+    session_id = chat_session.id
+
+    # Save user message and update session timestamp
+    user_msg = ChatMessage(session_id=session_id, role="user", content=query)
+    chat_db.add(user_msg)
+    if chat_session:
+        from datetime import datetime, timezone
+        chat_session.updated_at = datetime.now(timezone.utc)
+    chat_db.commit()
+
     intent = route_query(query)
     llm_context = ""       # Clean context sent to the LLM (no SQL leakage)
     debug_context = None   # Raw context returned in API response for debugging
@@ -169,8 +213,86 @@ def chat_endpoint(request: QueryRequest):
         intent=intent.value
     )
 
+    # Save bot message
+    bot_msg = ChatMessage(session_id=session_id, role="bot", content=final_answer, intent=intent.value)
+    chat_db.add(bot_msg)
+    chat_db.commit()
+
     return ChatResponse(
         response=final_answer,
         intent=intent,
+        session_id=session_id,
         context=debug_context
     )
+
+@app.get("/chat/{session_id}", response_model=ChatHistoryResponse, tags=["Query Pipeline"])
+def get_chat_history(session_id: str, chat_db: Session = Depends(get_chat_db)):
+    """
+    Retrieve the full chat history for a given session.
+    """
+    chat_session = chat_db.query(ChatSession).filter(ChatSession.id == session_id).first()
+    if not chat_session:
+        raise HTTPException(status_code=404, detail="Chat session not found")
+    
+    messages = []
+    for msg in chat_session.messages:
+        messages.append(ChatMessageResponse(
+            id=msg.id,
+            role=msg.role,
+            content=msg.content,
+            intent=msg.intent,
+            created_at=msg.created_at.isoformat() if msg.created_at else ""
+        ))
+    
+    return ChatHistoryResponse(
+        session_id=session_id,
+        messages=messages
+    )
+
+@app.get("/chats", response_model=list[ChatSessionPreview], tags=["Query Pipeline"])
+def get_all_chats(chat_db: Session = Depends(get_chat_db)):
+    """
+    Retrieve all chat sessions ordered by most recently updated.
+    """
+    sessions = chat_db.query(ChatSession).order_by(ChatSession.updated_at.desc()).all()
+    
+    previews = []
+    for session in sessions:
+        # Find the first user message for the preview
+        preview_text = "New Chat"
+        first_msg = next((m for m in session.messages if m.role == "user"), None)
+        if first_msg:
+            preview_text = first_msg.content[:50] + ("..." if len(first_msg.content) > 50 else "")
+            
+        previews.append(ChatSessionPreview(
+            id=session.id,
+            preview=preview_text,
+            updated_at=session.updated_at.isoformat() if session.updated_at else ""
+        ))
+        
+    return previews
+
+@app.delete("/chat/{session_id}/truncate/{message_id}", tags=["Query Pipeline"])
+def truncate_chat(session_id: str, message_id: str, chat_db: Session = Depends(get_chat_db)):
+    """
+    Truncate the chat session by deleting all messages that occur AFTER the given message_id.
+    Also deletes the specified message itself (so the user can resubmit it).
+    """
+    # Find the target message
+    target_msg = chat_db.query(ChatMessage).filter(
+        ChatMessage.session_id == session_id,
+        ChatMessage.id == message_id
+    ).first()
+
+    if not target_msg:
+        raise HTTPException(status_code=404, detail="Message not found")
+
+    # Delete all messages created at or after the target message
+    chat_db.query(ChatMessage).filter(
+        ChatMessage.session_id == session_id,
+        ChatMessage.created_at >= target_msg.created_at
+    ).delete(synchronize_session=False)
+
+    chat_db.commit()
+    
+    return {"status": "success", "deleted_from": target_msg.created_at.isoformat()}

@@ -17,12 +17,19 @@ load_dotenv(dotenv_path=_env_path)
 class Settings:
     """Application settings loaded from environment variables."""
 
-    # --- Database ---
+    # --- Main Database (MariaDB for Stats) ---
     DB_HOST: str = os.getenv("DB_HOST", "localhost")
     DB_PORT: int = int(os.getenv("DB_PORT", "3306"))
     DB_USER: str = os.getenv("DB_USER", "root")
     DB_PASSWORD: str = os.getenv("DB_PASSWORD", "")
     DB_NAME: str = os.getenv("DB_NAME", "krickbot")
+
+    # --- Chat Database (PostgreSQL for History) ---
+    CHAT_DB_HOST: str = os.getenv("CHAT_DB_HOST", "localhost")
+    CHAT_DB_PORT: int = int(os.getenv("CHAT_DB_PORT", "5432"))
+    CHAT_DB_USER: str = os.getenv("CHAT_DB_USER", "postgres")
+    CHAT_DB_PASSWORD: str = os.getenv("CHAT_DB_PASSWORD", "postgres")
+    CHAT_DB_NAME: str = os.getenv("CHAT_DB_NAME", "krickbot_chats")
 
     # --- Server ---
     APP_HOST: str = os.getenv("APP_HOST", "0.0.0.0")
@@ -51,6 +58,17 @@ class Settings:
             f"mysql+pymysql://{self.DB_USER}{password_part}"
             f"@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
             f"?charset=utf8mb4"
+        )
+
+    @property
+    def CHAT_DATABASE_URL(self) -> str:
+        """
+        SQLAlchemy connection string for PostgreSQL via psycopg2.
+        """
+        password_part = f":{self.CHAT_DB_PASSWORD}" if self.CHAT_DB_PASSWORD else ""
+        return (
+            f"postgresql://{self.CHAT_DB_USER}{password_part}"
+            f"@{self.CHAT_DB_HOST}:{self.CHAT_DB_PORT}/{self.CHAT_DB_NAME}"
         )
 
 

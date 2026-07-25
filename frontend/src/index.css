@@ -1,22 +1,30 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Inter:wght@400;500;600&display=swap');
+
 :root {
-  --bg-color: #ffffff;
-  --sidebar-bg: #f9f9f9;
-  --text-primary: #0d0d0d;
-  --text-secondary: #5e5e5e;
-  --border-color: #e5e5e5;
-  --primary-color: #10a37f;
-  --primary-hover: #0b7a5e;
-  --message-bot-bg: #f7f7f8;
-  --card-bg: #ffffff;
-  --card-border: #e5e5e5;
-  --card-hover: #f9f9f9;
-  --input-bg: #ffffff;
-  --input-border: #d9d9e3;
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
-  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-  --radius-md: 0.5rem;
-  --radius-lg: 0.75rem;
+  --bg-color: #f8fafc; /* Sleek light */
+  --bg-gradient: radial-gradient(circle at top right, #ffffff, #f1f5f9);
+  --sidebar-bg: rgba(255, 255, 255, 0.7);
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --border-color: rgba(0, 0, 0, 0.08);
+  --primary-color: #2563eb; 
+  --primary-hover: #1d4ed8;
+  --message-bot-bg: rgba(255, 255, 255, 0.7);
+  --message-user-bg: transparent;
+  --card-bg: rgba(255, 255, 255, 0.6);
+  --card-border: rgba(0, 0, 0, 0.05);
+  --card-hover: rgba(255, 255, 255, 1);
+  --input-bg: rgba(255, 255, 255, 0.8);
+  --input-border: rgba(0, 0, 0, 0.12);
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 12px -2px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 10px 25px -3px rgba(0, 0, 0, 0.1);
+  --shadow-glow: 0 0 15px rgba(37, 99, 235, 0.2);
+  --radius-md: 12px;
+  --radius-lg: 20px;
   --radius-full: 9999px;
+  --accent-gradient: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
+  --sidebar-backdrop: blur(20px);
 }
 
 * {
@@ -27,16 +35,23 @@
 
 body {
   font-family: 'Inter', system-ui, sans-serif;
-  background-color: var(--bg-color);
+  background: var(--bg-color);
+  background-image: var(--bg-gradient);
   color: var(--text-primary);
-  line-height: 1.5;
+  line-height: 1.6;
   display: flex;
   height: 100vh;
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: 'Outfit', system-ui, sans-serif;
 }
 
 #root {
   width: 100%;
   height: 100%;
 }
+
