@@ -92,6 +92,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.query_pipeline.intent_router import route_query, Intent
 from app.query_pipeline.text_to_sql import answer_factual_query
 from app.query_pipeline.response_generator import generate_response
+from app.query_pipeline.context_formatter import (
+    format_factual_context,
+    format_explanatory_context,
+    format_chitchat_context,
+)
 
 # Add CORS middleware to allow the frontend to access the API
 app.add_middleware(
@@ -125,32 +130,47 @@ def test_intent_router(request: QueryRequest):
 @app.post("/chat", response_model=ChatResponse, tags=["Query Pipeline"])
 def chat_endpoint(request: QueryRequest):
     """
-    Main Chat API. Takes user query, routes it, fetches context, and returns a natural language response.
+    Main Chat API.
+
+    Routes the user query, fetches data via the appropriate pipeline,
+    formats it through context_formatter (stripping all SQL/implementation
+    details), and generates a KrickBot-style analyst response.
     """
     query = request.query
     intent = route_query(query)
-    context_str = ""
-    
+    llm_context = ""       # Clean context sent to the LLM (no SQL leakage)
+    debug_context = None   # Raw context returned in API response for debugging
+
     if intent == Intent.FACTUAL:
-        # Generate SQL and execute against DB
+        # Generate SQL, execute, and format results for the LLM
         sql_result = answer_factual_query(query)
-        if sql_result.get("error"):
-            context_str = f"Error retrieving data: {sql_result['error']}"
-        else:
-            context_str = f"Database Results:\n{sql_result.get('results', [])}"
-            
+        llm_context = format_factual_context(sql_result, user_query=query)
+
+        # Keep raw SQL in debug context (API response only, never sent to LLM)
+        debug_context = f"SQL: {sql_result.get('sql', 'N/A')} | Rows: {len(sql_result.get('results', []))}"
+
     elif intent == Intent.EXPLANATORY:
-        # TODO: RAG Retriever implementation (Task 7)
-        context_str = "RAG retrieval is not yet implemented. Please answer generically based on cricket knowledge."
-        
+        # RAG retriever is not yet wired — provide a graceful fallback
+        # TODO: Wire in hybrid retriever from embedder module when ready
+        llm_context = format_explanatory_context(
+            "The knowledge base does not have detailed background information "
+            "for this topic yet. You may suggest the user ask a specific stats "
+            "question instead."
+        )
+        debug_context = "RAG retrieval: fallback (not yet wired)"
+
     elif intent == Intent.CHITCHAT:
-        context_str = "This is a casual conversation. Be polite and helpful."
-        
-    # Generate final response
-    final_answer = generate_response(query=query, context=context_str, intent=intent.value)
-    
+        llm_context = format_chitchat_context()
+
+    # Generate final response — the LLM only sees clean, formatted context
+    final_answer = generate_response(
+        query=query,
+        context=llm_context,
+        intent=intent.value
+    )
+
     return ChatResponse(
         response=final_answer,
         intent=intent,
-        context=context_str if intent != Intent.CHITCHAT else None
+        context=debug_context
     )

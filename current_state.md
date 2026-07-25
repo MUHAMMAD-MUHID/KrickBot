@@ -356,6 +356,104 @@ KrickBot/
 
 ---
 
+### [2026-07-25] Task 8: Response Generation — KrickBot Response Design Guide
+
+**Status**: ✅ Complete
+
+#### What was done
+
+1. **Created Context Formatter** (`app/query_pipeline/context_formatter.py`)
+   - New utility module that sits between data retrieval and response generation.
+   - Transforms raw SQL result dicts into clean, LLM-friendly JSON context.
+   - Classifies result shape (`single_stat`, `multi_stat`, `comparison`, `no_data`, `error`) so the system prompt can select the appropriate formatting template.
+   - Strips all implementation details (SQL queries, internal column names) — the LLM never sees the underlying query.
+   - Humanizes database column names (e.g., `BatsmanName` → `Batsman Name`).
+   - Provides dedicated formatters for FACTUAL, EXPLANATORY, and CHITCHAT intents.
+
+2. **Rewrote Response Generator** (`app/query_pipeline/response_generator.py`)
+   - Implemented the full KrickBot persona from the Response Design Guide (§1, §8): precision, controlled enthusiasm, honesty about limits.
+   - 10-rule system prompt covering: data-only grounding, bold key stats, tables for 3+ stats, format specification (Test/ODI/T20I), no filler phrases, no process leakage, confidence-level phrasing.
+   - Intent-specific prompt extensions:
+     - FACTUAL: template selection based on `result_type` (single sentence vs table vs comparison with verdict)
+     - EXPLANATORY: narrative synthesis with hedging language for derived insights
+     - CHITCHAT: brief cricket-flavored personality
+   - Calibrated temperature per intent: 0.15 (FACTUAL), 0.35 (EXPLANATORY), 0.6 (CHITCHAT).
+   - Post-processing `_strip_leakage()` safety net that removes accidental SQL/database mentions from LLM output.
+
+3. **Updated Chat Endpoint** (`app/main.py`)
+   - Replaced raw SQL context formatting (which leaked `"SQL Query Used: SELECT..."` to the LLM) with clean `context_formatter` calls.
+   - Separated `llm_context` (clean JSON for the LLM) from `debug_context` (raw SQL info returned in API response for debugging only).
+   - EXPLANATORY path uses graceful fallback with proper messaging until RAG retriever is wired in.
+
+#### Verification Results
+
+| Test | Result |
+|---|---|
+| Import check | ✅ All modules import cleanly, system prompt renders correctly |
+| Context formatter — single stat | ✅ 1 row → `single_stat`, SQL stripped |
+| Context formatter — multi stat | ✅ 2+ rows → `multi_stat`, floats formatted to 2 decimals |
+| Context formatter — comparison | ✅ "vs" keyword + 2+ rows → `comparison` |
+| Context formatter — no data | ✅ Empty results → `no_data` with message |
+| Context formatter — error | ✅ Error key → `error` with message |
+| Live `/chat` — factual query | ✅ Bold key number, table format, no SQL leakage |
+| Live `/chat` — chitchat | ✅ Brief, cricket-themed response |
+| Live `/chat` — explanatory fallback | ✅ Honest "I don't have that data" + suggests stats question |
+
+---
+
+## Current File Structure
+
+```
+KrickBot/
+├── app/
+│   ├── __init__.py
+│   ├── config.py                   # Configuration loader (.env → typed settings)
+│   ├── database.py                 # SQLAlchemy engine, session factory, health check
+│   ├── main.py                     # FastAPI entry point (health, sync/status, chat endpoints)
+│   ├── models/
+│   │   ├── __init__.py
+│   │   └── sync_state.py           # SyncState ORM model (watermark tracker)
+│   ├── update_pipeline/
+│   │   ├── __init__.py
+│   │   ├── watermark.py            # Watermark read/write operations
+│   │   ├── delta_extractor.py      # Extracts new DB rows via watermarks
+│   │   ├── document_generator.py   # Row-to-text converters
+│   │   └── embedder.py             # BGE model local embedder + DB upsert
+│   ├── query_pipeline/
+│   │   ├── __init__.py
+│   │   ├── intent_router.py        # Classifies query into FACTUAL/EXPLANATORY/CHITCHAT
+│   │   ├── text_to_sql.py          # Generates and executes safe SQL via LLM
+│   │   ├── rag_retriever.py        # [PLACEHOLDER] Hybrid Vector + Keyword RAG retrieval
+│   │   ├── context_formatter.py    # Transforms raw data into clean LLM-ready context
+│   │   └── response_generator.py   # KrickBot persona + anti-hallucination response generation
+│   └── utils/
+│       ├── __init__.py
+│       └── logger.py               # Centralized logging factory
+├── scripts/
+│   ├── create_sync_state.py        # Migration: create & seed sync_state table
+│   ├── create_vector_store.py      # Migration: create vector_store table
+│   ├── generate_finetuning_dataset.py # Generates dataset.jsonl for Colab fine-tuning
+│   ├── run_update_pipeline.py      # Main orchestrator (runs doc gen loop)
+│   ├── test_doc_generator.py       # Test script for extraction/generation
+│   ├── test_intent_router.py       # Test script for classification logic
+│   ├── test_text_to_sql.py         # Test script for SQL generation
+│   └── test_vector_store.py        # Test script for embeddings
+├── tests/
+│   └── __init__.py
+├── .env                            # Environment variables (has DB password)
+├── .env.example                    # Template for .env
+├── dataset.jsonl                   # Fine-tuning dataset (generated)
+├── colab_finetuning_pipeline.ipynb # Google Colab notebook for LLM fine-tuning
+├── requirements.txt                # Python dependencies
+├── current_state.md                # THIS FILE — change history
+├── README.md                       # Project overview
+├── Cricket_Chatbot_Solution_Design.md   # Solution design doc
+├── cricket_chatbot_technical_spec.md    # Technical specification
+└── schema.sql                           # MariaDB schema dump
+```
+
+---
+
 ## Next Steps (Upcoming Tasks)
 
 | Task | Description | Status |
@@ -366,7 +464,7 @@ KrickBot/
 | Task 5 | Intent Router — factual vs explanatory classification | ✅ Complete |
 | Task 6 | Text-to-SQL — schema-aware SQL generation with safeguards | ✅ Complete |
 | Task 7 | RAG Retrieval — hybrid search + metadata filtering + reranking | ✅ Complete |
-| Task 8 | Response Generation — wire context into fine-tuned LLM | Pending |
+| Task 8 | Response Generation — KrickBot Response Design Guide implementation | ✅ Complete |
 | Task 9 | Self-Check (optional) — validate numeric claims before responding | Pending |
 | Task 10 | Fine-Tuning Pipeline — offline LLM training process | ✅ Complete |
 | Task 11 | Testing — idempotency tests, accuracy evaluation | Pending |

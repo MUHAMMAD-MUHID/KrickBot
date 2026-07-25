@@ -15,342 +15,279 @@ from groq import Groq
 
 logger = get_logger(__name__)
 
-# SQLCoder has a very strict prompt template. We must adhere to it exactly.
-SCHEMA_CONTEXT = """CREATE TABLE article (
-  ArticleId int
-);
+# ─── Focused Schema: Only cricket-relevant tables with ALL columns ───
+# This gives the LLM full visibility into column names, types, and relationships.
+SCHEMA_CONTEXT = """
+-- ======================== CORE MATCH TABLES ========================
 
-CREATE TABLE article_group (
-  GroupId int
-);
-
-CREATE TABLE article_tags (
-  ID int
-);
-
-CREATE TABLE association (
-  AssociationId int
-);
-
-CREATE TABLE ball_by_ball (
-  BallId int
-);
-
-CREATE TABLE batting_detail (
-  MatchNo int
-);
-
-CREATE TABLE batting_stats (
-  PlayerId int
-);
-
-CREATE TABLE bowling_detail (
-  MatchNo int
-);
-
-CREATE TABLE bowling_stats (
-  PlayerId int
-);
-
-CREATE TABLE budget (
-  Id int
-);
-
-CREATE TABLE category (
-  CatId int
-);
-
-CREATE TABLE city (
-  CityId int
-);
-
-CREATE TABLE city_cricket_association (
-  CCAId int
-);
-
-CREATE TABLE club (
-  ClubId int
-);
-
-CREATE TABLE comment (
-  CommentId int
-);
-
-CREATE TABLE country (
-  CountryName varchar
-);
-
-CREATE TABLE cricket_association (
-  CAId int
-);
-
-CREATE TABLE current_day (
-  FinDay date,
-  Current tinyint
-);
-
-CREATE TABLE department (
-  DepartmentId int
-);
-
-CREATE TABLE edition (
-  EditionId int
-);
-
-CREATE TABLE event (
-  EventId int
-);
-
-CREATE TABLE fantasy_prediction (
-  ID int
-);
-
-CREATE TABLE fantasy_result (
-  ID int
-);
-
-CREATE TABLE fantasy_user (
-  FUserId int
-);
-
-CREATE TABLE feedback (
-  Id int
-);
-
-CREATE TABLE fow (
-  MatchNo int
-);
-
-CREATE TABLE gallery (
-  GalleryId int
-);
-
-CREATE TABLE ground (
-  GroundId int
-);
-
-CREATE TABLE group (
-  GroupId int
-);
-
-CREATE TABLE group_screen (
-  ScreenId int
+CREATE TABLE matches (
+  MatchNo int PRIMARY KEY,          -- Unique match identifier
+  Season varchar(7),                -- e.g. '2019', '2020' (VARCHAR, not a date!)
+  Dated datetime,                   -- Match date
+  Winner int,                       -- FK → team.TeamId (winning team)
+  RunnerUP int,                     -- FK → team.TeamId
+  WinnerName varchar(45),           -- Denormalized winner team name
+  RunnerupName varchar(45),         -- Denormalized runner-up team name
+  Team1 int NOT NULL,               -- FK → team.TeamId
+  Team2 int NOT NULL,               -- FK → team.TeamId
+  Team1Name varchar(45),            -- Denormalized team 1 name
+  Team2Name varchar(45),            -- Denormalized team 2 name
+  ResultDetail varchar(150),        -- e.g. 'Won by 5 wickets'
+  ResultType enum('WinLoss','Tie','Draw','No Result','Abandoned','Awarded','Conceded'),
+  Overs int,                        -- Match overs limit
+  Format varchar(20),               -- e.g. 'One Day', 'T20', 'Test'
+  Type varchar(20),                 -- e.g. 'Friendly Match', 'League'
+  TournamentId int,                 -- FK → tournament.TournamentId
+  GroundId int,                     -- FK → ground.GroundId
+  ManOfMatch int,                   -- FK → player.PlayerId
+  Toss int,                         -- FK → team.TeamId (who won toss)
+  Status varchar(1),                -- 'S' = scheduled, 'C' = completed
+  Summary varchar(3500),
+  CityName varchar(50),
+  CountryName varchar(50)
 );
 
 CREATE TABLE innings (
-  MatchNo int
+  MatchNo int NOT NULL,             -- FK → matches.MatchNo
+  Innings int NOT NULL,             -- 1 or 2
+  Score int,                        -- Total runs scored
+  Overs double,                     -- Overs bowled
+  Wickets int DEFAULT 0,            -- Wickets fallen
+  BattingTeam int,                  -- FK → team.TeamId
+  BowlingTeam int,                  -- FK → team.TeamId
+  BattingTeamName varchar(50),
+  BowlingTeamName varchar(50),
+  PRIMARY KEY (MatchNo, Innings)
 );
 
-CREATE TABLE inreport (
-  ReportId int
+CREATE TABLE fow (
+  MatchNo int NOT NULL,             -- FK → matches.MatchNo
+  Innings int NOT NULL,
+  Wicket int NOT NULL,              -- Wicket number (1-10)
+  Overs double,
+  Score int,                        -- Score at fall of wicket
+  Batsman int,                      -- FK → player.PlayerId
+  Bowler int,                       -- FK → player.PlayerId
+  BatsmanName varchar(50),
+  BowlerName varchar(50),
+  HowOut varchar(10),
+  PRIMARY KEY (MatchNo, Innings, Wicket)
 );
 
-CREATE TABLE live_ball_by_ball (
-  BallId bigint
-);
+-- ======================== PLAYER & TEAM ========================
 
-CREATE TABLE live_batting_detail (
-  MatchNo int
-);
-
-CREATE TABLE live_bowling_detail (
-  MatchNo int
-);
-
-CREATE TABLE live_fow (
-  MatchNo int
-);
-
-CREATE TABLE live_innings (
-  MatchNo int
-);
-
-CREATE TABLE live_match_over (
-  MatchNo int
-);
-
-CREATE TABLE live_match_squad (
-  TeamId int
-);
-
-CREATE TABLE live_matches (
-  MatchNo int
-);
-
-CREATE TABLE livescore (
-  Id datetime,
-  Team1 varchar
-);
-
-CREATE TABLE match_comments (
-  CommentId int
-);
-
-CREATE TABLE match_over (
-  MatchNo int
-);
-
-CREATE TABLE match_squad (
-  TeamId int
-);
-
-CREATE TABLE matches (
-  MatchNo int
-);
-
-CREATE TABLE media_item (
-  ItemId int
-);
-
-CREATE TABLE news (
-  NewsId int
-);
-
-CREATE TABLE object_pics (
-  ID int
-);
-
-CREATE TABLE offer (
-  OfferId int
-);
-
-CREATE TABLE official (
-  Id int
-);
-
-CREATE TABLE outreport (
-  ReportId int
-);
-
-CREATE TABLE outreport_data (
-  Id int
-);
-
-CREATE TABLE photo (
-  PhotoId int
+CREATE TABLE team (
+  TeamId int PRIMARY KEY AUTO_INCREMENT,
+  TeamName varchar(50),
+  ShortName varchar(10),
+  Level varchar(30),
+  Season varchar(7),
+  Coach varchar(30),
+  Captain int                       -- FK → player.PlayerId
 );
 
 CREATE TABLE player (
-  PlayerId int
+  PlayerId int PRIMARY KEY AUTO_INCREMENT,
+  FullName varchar(100),
+  DOB date,
+  BattingStyle varchar(50),
+  BowlingStyle varchar(50),
+  PlayingRole varchar(30),          -- e.g. 'Batsman', 'Bowler', 'All-Rounder'
+  ClubId int,                       -- FK → club.ClubId
+  ShortName varchar(10)
 );
 
-CREATE TABLE player_follower (
-  PlayerId int
+CREATE TABLE club (
+  ClubId int PRIMARY KEY AUTO_INCREMENT,
+  ClubName varchar(45),
+  AssociationId int
 );
 
-CREATE TABLE point_table (
-  TournamentId int
+-- ======================== MATCH-LEVEL DETAIL ========================
+
+CREATE TABLE batting_detail (
+  MatchNo int NOT NULL,             -- FK → matches.MatchNo
+  Innings int NOT NULL,
+  PlayerId int NOT NULL,            -- FK → player.PlayerId
+  Runs int DEFAULT 0,
+  BallsFaced int DEFAULT 0,
+  Fours int DEFAULT 0,
+  Sixes int DEFAULT 0,
+  Singles int DEFAULT 0,
+  Doubles int DEFAULT 0,
+  Threes int DEFAULT 0,
+  Dots int DEFAULT 0,
+  NotOut tinyint,                   -- 1 = not out, 0 = out
+  HowOut varchar(20),               -- e.g. 'Bowled', 'Caught', 'LBW'
+  Bowler int,                       -- FK → player.PlayerId (bowler who got the wicket)
+  Fielder int,                      -- FK → player.PlayerId
+  BatsmanName varchar(100),
+  TeamId int,                       -- FK → team.TeamId
+  TeamName varchar(100),
+  Position int DEFAULT 0,           -- Batting position
+  PRIMARY KEY (MatchNo, Innings, PlayerId)
 );
 
-CREATE TABLE points (
-  TournamentId int
+CREATE TABLE bowling_detail (
+  MatchNo int NOT NULL,             -- FK → matches.MatchNo
+  Innings int NOT NULL,
+  PlayerId int NOT NULL,            -- FK → player.PlayerId
+  Overs double DEFAULT 0,
+  Maiden int DEFAULT 0,
+  Runs int DEFAULT 0,
+  Wickets int DEFAULT 0,
+  Wides int DEFAULT 0,
+  NoBalls int DEFAULT 0,
+  BowlerName varchar(100),
+  TeamId int,                       -- FK → team.TeamId
+  TeamName varchar(45),
+  Balls int,
+  PRIMARY KEY (MatchNo, Innings, PlayerId)
 );
 
-CREATE TABLE posts (
-  PostId int
+-- ======================== AGGREGATED STATS ========================
+
+CREATE TABLE batting_stats (
+  PlayerId int NOT NULL,            -- FK → player.PlayerId
+  Season varchar(10) NOT NULL,      -- e.g. '2019'
+  Stage varchar(20) NOT NULL,
+  Format varchar(10) NOT NULL,      -- e.g. 'T20', 'ODI'
+  Matches int DEFAULT 0,
+  Inn int DEFAULT 0,
+  NotOut int DEFAULT 0,
+  Runs int DEFAULT 0,
+  HS int DEFAULT 0,                 -- Highest Score
+  Average decimal(6,2),
+  BF int DEFAULT 0,                 -- Balls Faced
+  SR decimal(6,2),                  -- Strike Rate
+  Hundreds int DEFAULT 0,
+  Fifties int DEFAULT 0,
+  Zeros int DEFAULT 0,              -- Ducks
+  Fours int DEFAULT 0,
+  Sixes int DEFAULT 0,
+  Catches int,
+  Stumps int,
+  PlayerName varchar(50),
+  PRIMARY KEY (PlayerId, Season, Stage, Format)
 );
 
-CREATE TABLE province (
-  ProvinceId int
+CREATE TABLE bowling_stats (
+  PlayerId int NOT NULL,            -- FK → player.PlayerId
+  Season varchar(10) NOT NULL,
+  Stage varchar(20) NOT NULL,
+  Format varchar(10) NOT NULL,
+  Matches int DEFAULT 0,
+  Inn int DEFAULT 0,
+  Balls int DEFAULT 0,
+  Runs int DEFAULT 0,
+  Wickets int DEFAULT 0,
+  BBI varchar(8),                   -- Best Bowling in Innings
+  Average decimal(6,2),
+  Economy decimal(6,2),
+  StrikeRate decimal(6,2),
+  Fourfor int DEFAULT 0,            -- 4-wicket hauls
+  Fivefor int DEFAULT 0,            -- 5-wicket hauls
+  PlayerName varchar(50),
+  PRIMARY KEY (PlayerId, Season, Stage, Format)
 );
 
-CREATE TABLE recover_your_data (
-  text varchar
-);
-
-CREATE TABLE region (
-  RegionId int
-);
-
-CREATE TABLE round_team (
-  RoundTeamId int
-);
-
-CREATE TABLE scorer (
-  ScorerId int
-);
-
-CREATE TABLE scorer_setup_sync_event (
-  ClientEventId varchar
-);
-
-CREATE TABLE scorer_tournament (
-  ScorerId int
-);
-
-CREATE TABLE screen (
-  ScreenId int
-);
-
-CREATE TABLE season (
-  Season varchar
-);
-
-CREATE TABLE section (
-  SectionId int
-);
-
-CREATE TABLE section_head (
-  HeadId int
-);
-
-CREATE TABLE squad (
-  TeamId int
-);
-
-CREATE TABLE sw_user (
-  UserId int
-);
-
-CREATE TABLE tags (
-  TagId int
-);
-
-CREATE TABLE team (
-  TeamId int
-);
-
-CREATE TABLE temp (
-  ArticleId int
-);
-
-CREATE TABLE test_table (
-  id int
-);
+-- ======================== TOURNAMENT & GROUND ========================
 
 CREATE TABLE tournament (
-  TournamentId int
+  TournamentId int PRIMARY KEY AUTO_INCREMENT,
+  Name varchar(80),
+  Format varchar(45),
+  Season varchar(10),
+  StartDate datetime,
+  EndDate datetime,
+  Winner int,                       -- FK → team.TeamId
+  RunnerUp int,                     -- FK → team.TeamId
+  Level varchar(10),
+  Status char(1)                    -- 'A' = active, etc.
 );
 
-CREATE TABLE tournament_club (
-  TournamentId int
+CREATE TABLE ground (
+  GroundId int PRIMARY KEY AUTO_INCREMENT,
+  GroundName varchar(50),
+  Address varchar(100),
+  CityId int
 );
 
-CREATE TABLE tournament_round (
-  RoundId int
-);
-
-CREATE TABLE user_group (
-  GroupId int
-);
-
-CREATE TABLE users (
-  UserId int
+CREATE TABLE ball_by_ball (
+  BallId int PRIMARY KEY AUTO_INCREMENT,
+  MatchNo int,                      -- FK → matches.MatchNo
+  Innings int,
+  Over int,
+  Ball int,
+  BatsmanId int,                    -- FK → player.PlayerId
+  BowlerId int,                    -- FK → player.PlayerId
+  Runs int DEFAULT 0,
+  Wide int DEFAULT 0,
+  NoBall int DEFAULT 0,
+  Wicket int DEFAULT 0,
+  BatsmanName varchar(100),
+  BowlerName varchar(100)
 );
 """
 
+# ─── Key notes for the LLM to understand data patterns ───
+SCHEMA_NOTES = """
+### Important Notes:
+- The `Season` column is a VARCHAR like '2019', '2020'. Do NOT use YEAR(Dated) to filter by year; use `Season = '2019'` or `WHERE matches.Season = '2019'`.
+- `matches.Winner` is a TeamId (int FK). `matches.WinnerName` is the denormalized team name (varchar). Use WinnerName for display.
+- `matches.Team1Name` and `matches.Team2Name` are denormalized team names. You usually don't need to JOIN team table.
+- `batting_detail.BatsmanName` and `bowling_detail.BowlerName` are denormalized. You usually don't need to JOIN player table.
+- For "who won the most matches", COUNT matches grouped by WinnerName.
+- For "highest scorer", use batting_detail or batting_stats.
+- For "best bowler", use bowling_detail (match-level) or bowling_stats (aggregated).
+- `batting_stats` and `bowling_stats` are pre-aggregated per player per season. Use these for season-level stats.
+- CRITICAL: NEVER use UNION between batting_stats and bowling_stats — they have different column counts and UNION will always fail. Pick ONE table based on the question.
+- CRITICAL: NEVER JOIN batting_stats with bowling_stats — they share column names (PlayerName, Runs, Season) causing ambiguity errors. Query them separately.
+- If the user asks about a player's "stats" or "achievements" without specifying batting or bowling, query batting_stats ONLY (batting is the default).
+- If the user asks specifically about bowling/wickets, query bowling_stats ONLY.
+- Use LIKE '%name%' for player name searches since names may not match exactly.
+
+### Example Queries:
+Q: "Who won the most matches in 2019?"
+SQL: SELECT WinnerName, COUNT(*) AS wins FROM matches WHERE Season = '2019' AND Winner IS NOT NULL GROUP BY WinnerName ORDER BY wins DESC LIMIT 10
+
+Q: "Who scored the highest runs in a single match?"
+SQL: SELECT BatsmanName, Runs, MatchNo FROM batting_detail ORDER BY Runs DESC LIMIT 1
+
+Q: "Top 5 bowlers by wickets in 2020"
+SQL: SELECT PlayerName, SUM(Wickets) AS total_wickets FROM bowling_stats WHERE Season = '2020' GROUP BY PlayerName ORDER BY total_wickets DESC LIMIT 5
+
+Q: "How many matches were played in 2019?"
+SQL: SELECT COUNT(*) AS total_matches FROM matches WHERE Season = '2019'
+
+Q: "List match winners in 2019"
+SQL: SELECT MatchNo, Dated, WinnerName, RunnerupName, ResultDetail FROM matches WHERE Season = '2019' AND Winner IS NOT NULL ORDER BY Dated
+
+Q: "Tell me achievements of Shoaib Malik" or "Shoaib Malik stats"
+SQL: SELECT PlayerName, Season, Matches, Runs, HS, Average, SR, Hundreds, Fifties FROM batting_stats WHERE PlayerName LIKE '%Shoaib Malik%'
+
+Q: "Shoaib Malik bowling stats" or "how many wickets did Shoaib Malik take"
+SQL: SELECT PlayerName, Season, Matches, Wickets, Average, Economy, BBI FROM bowling_stats WHERE PlayerName LIKE '%Shoaib Malik%'
+"""
+
+
 def build_prompt(user_query: str) -> str:
-    """Constructs the strict prompt required by defog/sqlcoder-7b-2."""
+    """Constructs a rich prompt with schema, notes, and examples for accurate SQL generation."""
     prompt = f"""### Task
 Generate a SQL query to answer [QUESTION]{user_query}[/QUESTION]
 
 ### Instructions
 - If you cannot answer the question with the available database schema, return 'I do not know'
 - Generate a MariaDB compliant SELECT query.
+- Use the denormalized name columns (WinnerName, BatsmanName, etc.) when possible instead of JOINs.
+- The Season column is a VARCHAR (e.g. '2019'). Never use YEAR() on it.
+- Output ONLY the SQL query, nothing else.
 
 ### Database Schema
 This query will run on a database whose schema is represented in this string:
 {SCHEMA_CONTEXT}
+
+{SCHEMA_NOTES}
 
 ### Answer
 Given the database schema, here is the SQL query that answers [QUESTION]{user_query}[/QUESTION]
@@ -374,20 +311,37 @@ def generate_sql(query: str) -> str:
         completion = client.chat.completions.create(
             model="llama-3.1-8b-instant",
             messages=[
-                {"role": "system", "content": "You are a specialized SQL expert. Output ONLY valid SQL queries based on the prompt."},
+                {"role": "system", "content": (
+                    "You are a SQL expert for a cricket database. "
+                    "Output ONLY a valid MariaDB SELECT query. No explanations, no markdown fences, no comments. "
+                    "Use the denormalized name columns (WinnerName, Team1Name, BatsmanName, PlayerName, etc.) for display. "
+                    "The Season column is a VARCHAR like '2019', never use YEAR() on it. "
+                    "If you cannot answer, output exactly: I do not know"
+                )},
                 {"role": "user", "content": prompt}
             ],
             temperature=0.0,
-            max_tokens=256,
+            max_tokens=512,
         )
         
         generated_query = completion.choices[0].message.content
+        
+        # If the model says it doesn't know, return empty
+        if "i do not know" in generated_query.lower():
+            logger.info("LLM responded: I do not know")
+            return ""
         
         # Clean up the response (extract just the query if it includes markdown)
         sql = generated_query.split("[/SQL]")[0].strip()
         sql = re.sub(r'^```sql\s*', '', sql, flags=re.IGNORECASE)
         sql = re.sub(r'^```\s*', '', sql)
         sql = re.sub(r'```$', '', sql)
+        sql = sql.strip()
+        
+        # Remove any leading text before SELECT
+        select_idx = sql.upper().find("SELECT")
+        if select_idx > 0:
+            sql = sql[select_idx:]
         
         # Strip trailing semicolon so we can safely append LIMIT
         sql = sql.rstrip().rstrip(";")
@@ -396,13 +350,10 @@ def generate_sql(query: str) -> str:
         if "LIMIT " not in sql.upper():
             sql += " LIMIT 10"
             
+        logger.info(f"Generated SQL: {sql}")
         return sql.strip()
     except Exception as e:
         logger.error(f"Error calling Groq for SQL: {str(e)}")
-        # For testing purposes if VRAM crashes:
-        if "highest score" in query.lower():
-             logger.warning("Falling back to test query due to model error.")
-             return "SELECT MAX(Runs) as highest_score FROM batting_detail LIMIT 1"
         return ""
 
 def validate_sql(sql: str) -> bool:
