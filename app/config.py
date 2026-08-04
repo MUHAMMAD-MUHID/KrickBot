@@ -63,13 +63,16 @@ class Settings:
     @property
     def CHAT_DATABASE_URL(self) -> str:
         """
-        SQLAlchemy connection string for PostgreSQL via psycopg2.
+        SQLAlchemy connection string for Chat History.
+        Defaults to MariaDB so a separate PostgreSQL setup is not required.
         """
-        password_part = f":{self.CHAT_DB_PASSWORD}" if self.CHAT_DB_PASSWORD else ""
-        return (
-            f"postgresql://{self.CHAT_DB_USER}{password_part}"
-            f"@{self.CHAT_DB_HOST}:{self.CHAT_DB_PORT}/{self.CHAT_DB_NAME}"
-        )
+        if os.getenv("USE_POSTGRES_CHAT_DB") == "true":
+            password_part = f":{self.CHAT_DB_PASSWORD}" if self.CHAT_DB_PASSWORD else ""
+            return (
+                f"postgresql://{self.CHAT_DB_USER}{password_part}"
+                f"@{self.CHAT_DB_HOST}:{self.CHAT_DB_PORT}/{self.CHAT_DB_NAME}"
+            )
+        return self.DATABASE_URL
 
 
 # Singleton instance — import this everywhere

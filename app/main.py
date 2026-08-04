@@ -30,6 +30,13 @@ async def lifespan(app: FastAPI):
     logger.info("KrickBot starting up...")
     if check_db_connection():
         logger.info("[OK] MariaDB connection OK.")
+        try:
+            from app.database import ChatBase, chat_engine
+            import app.models.chat  # register models
+            ChatBase.metadata.create_all(bind=chat_engine)
+            logger.info("[OK] Chat history tables initialized.")
+        except Exception as e:
+            logger.warning(f"Chat table creation warning: {e}")
     else:
         logger.error(
             "[FAIL] Cannot connect to MariaDB. Check .env settings and ensure "
@@ -91,6 +98,7 @@ from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 from app.query_pipeline.intent_router import route_query, Intent
 from app.query_pipeline.text_to_sql import answer_factual_query
+from app.query_pipeline.rag_retriever import retrieve_context
 from app.query_pipeline.response_generator import generate_response
 from app.query_pipeline.context_formatter import (
     format_factual_context,
@@ -194,14 +202,16 @@ def chat_endpoint(request: QueryRequest, chat_db: Session = Depends(get_chat_db)
         debug_context = f"SQL: {sql_result.get('sql', 'N/A')} | Rows: {len(sql_result.get('results', []))}"
 
     elif intent == Intent.EXPLANATORY:
-        # RAG retriever is not yet wired — provide a graceful fallback
-        # TODO: Wire in hybrid retriever from embedder module when ready
-        llm_context = format_explanatory_context(
-            "The knowledge base does not have detailed background information "
-            "for this topic yet. You may suggest the user ask a specific stats "
-            "question instead."
-        )
-        debug_context = "RAG retrieval: fallback (not yet wired)"
+        retrieved_docs = retrieve_context(query, top_k=3)
+        if retrieved_docs:
+            llm_context = format_explanatory_context(retrieved_docs)
+            debug_context = f"RAG retrieval: found relevant context ({len(retrieved_docs)} chars)"
+        else:
+            llm_context = format_explanatory_context(
+                "The knowledge base does not have detailed background information "
+                "for this topic yet. You may suggest the user ask a specific stats question instead."
+            )
+            debug_context = "RAG retrieval: no documents found in vector_store"
 
     elif intent == Intent.CHITCHAT:
         llm_context = format_chitchat_context()

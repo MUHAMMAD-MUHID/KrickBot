@@ -234,6 +234,7 @@ CREATE TABLE ball_by_ball (
 SCHEMA_NOTES = """
 ### Important Notes:
 - The `Season` column is a VARCHAR like '2019', '2020'. Do NOT use YEAR(Dated) to filter by year; use `Season = '2019'` or `WHERE matches.Season = '2019'`.
+- CRITICAL: `batting_detail` and `bowling_detail` DO NOT have a `Season` column. For queries filtering by Season or year (e.g. "in 2024"), use `batting_stats` / `bowling_stats`, OR JOIN `matches` ON `batting_detail.MatchNo = matches.MatchNo`.
 - `matches.Winner` is a TeamId (int FK). `matches.WinnerName` is the denormalized team name (varchar). Use WinnerName for display.
 - `matches.Team1Name` and `matches.Team2Name` are denormalized team names. You usually don't need to JOIN team table.
 - `batting_detail.BatsmanName` and `bowling_detail.BowlerName` are denormalized. You usually don't need to JOIN player table.
