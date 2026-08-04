@@ -152,6 +152,7 @@ CREATE TABLE batting_stats (
   Season varchar(10) NOT NULL,      -- e.g. '2019'
   Stage varchar(20) NOT NULL,
   Format varchar(10) NOT NULL,      -- e.g. 'T20', 'ODI'
+  ICC varchar(20),                  -- '1' = ICC-recognised stats, '0' = non-ICC
   Matches int DEFAULT 0,
   Inn int DEFAULT 0,
   NotOut int DEFAULT 0,
@@ -176,6 +177,7 @@ CREATE TABLE bowling_stats (
   Season varchar(10) NOT NULL,
   Stage varchar(20) NOT NULL,
   Format varchar(10) NOT NULL,
+  ICC varchar(20),                  -- '1' = ICC-recognised stats, '0' = non-ICC
   Matches int DEFAULT 0,
   Inn int DEFAULT 0,
   Balls int DEFAULT 0,
@@ -210,7 +212,22 @@ CREATE TABLE ground (
   GroundId int PRIMARY KEY AUTO_INCREMENT,
   GroundName varchar(50),
   Address varchar(100),
-  CityId int
+  CityId int,                       -- FK → city.CityId
+  CountryCode int                   -- FK → country.CountryCode
+);
+
+CREATE TABLE city (
+  CityId int PRIMARY KEY AUTO_INCREMENT,
+  CityName varchar(50),
+  CountryCode int                   -- FK → country.CountryCode
+);
+
+CREATE TABLE country (
+  CountryCode int PRIMARY KEY,
+  CountryName varchar(50),
+  BoardName varchar(60),
+  ISOCode2 varchar(2),
+  ISOCode3 varchar(3)
 );
 
 CREATE TABLE ball_by_ball (
@@ -242,6 +259,9 @@ SCHEMA_NOTES = """
 - For "highest scorer", use batting_detail or batting_stats.
 - For "best bowler", use bowling_detail (match-level) or bowling_stats (aggregated).
 - `batting_stats` and `bowling_stats` are pre-aggregated per player per season. Use these for season-level stats.
+- For "ICC", "international", or "ICC-recognised" stats, filter batting_stats/bowling_stats with `ICC = '1'`.
+- For maiden-over questions, use `bowling_detail` because `bowling_stats` does not have a Maiden column.
+- For stadium/ground location questions, use `ground` joined to `city` and `country`.
 - CRITICAL: NEVER use UNION between batting_stats and bowling_stats — they have different column counts and UNION will always fail. Pick ONE table based on the question.
 - CRITICAL: NEVER JOIN batting_stats with bowling_stats — they share column names (PlayerName, Runs, Season) causing ambiguity errors. Query them separately.
 - If the user asks about a player's "stats" or "achievements" without specifying batting or bowling, query batting_stats ONLY (batting is the default).
@@ -257,6 +277,18 @@ SQL: SELECT BatsmanName, Runs, MatchNo FROM batting_detail ORDER BY Runs DESC LI
 
 Q: "Top 5 bowlers by wickets in 2020"
 SQL: SELECT PlayerName, SUM(Wickets) AS total_wickets FROM bowling_stats WHERE Season = '2020' GROUP BY PlayerName ORDER BY total_wickets DESC LIMIT 5
+
+Q: "Top 5 players with most maiden overs"
+SQL: SELECT BowlerName, SUM(Maiden) AS total_maidens, COUNT(DISTINCT MatchNo) AS matches FROM bowling_detail WHERE Maiden > 0 GROUP BY BowlerName ORDER BY total_maidens DESC LIMIT 5
+
+Q: "Which player has more runs in ICC?"
+SQL: SELECT PlayerName, SUM(Runs) AS total_runs, SUM(Matches) AS matches FROM batting_stats WHERE ICC = '1' GROUP BY PlayerName ORDER BY total_runs DESC LIMIT 10
+
+Q: "Pakistan has stadium in which cities?"
+SQL: SELECT c.CityName, COUNT(*) AS stadiums FROM ground g LEFT JOIN city c ON g.CityId = c.CityId LEFT JOIN country co ON COALESCE(g.CountryCode, c.CountryCode) = co.CountryCode WHERE co.CountryName LIKE '%Pakistan%' GROUP BY c.CityName ORDER BY stadiums DESC LIMIT 20
+
+Q: "Which country has how many stadiums?"
+SQL: SELECT co.CountryName, COUNT(*) AS stadiums FROM ground g LEFT JOIN country co ON g.CountryCode = co.CountryCode GROUP BY co.CountryName ORDER BY stadiums DESC LIMIT 20
 
 Q: "How many matches were played in 2019?"
 SQL: SELECT COUNT(*) AS total_matches FROM matches WHERE Season = '2019'
@@ -296,12 +328,153 @@ Given the database schema, here is the SQL query that answers [QUESTION]{user_qu
 """
     return prompt
 
+def _sql_literal(value: str) -> str:
+    """Escape a string for use in deterministic read-only SQL snippets."""
+    return value.replace("'", "''")
+
+def generate_known_sql(query: str) -> str:
+    """
+    Deterministic SQL for high-frequency leaderboard questions.
+
+    This catches casual phrasing like "who has more runs in ICC" before the
+    request goes to the LLM, which may otherwise treat "more" as a comparison
+    between two named players.
+    """
+    lower_query = query.lower()
+
+    asks_for_stadiums = re.search(r"\b(stadiums?|grounds?)\b", lower_query) is not None
+    asks_for_cities = re.search(r"\b(cities|city)\b", lower_query) is not None
+    asks_for_countries = re.search(r"\b(countries|country)\b", lower_query) is not None
+
+    if asks_for_stadiums:
+        known_countries = [
+            "Pakistan", "India", "Sri Lanka", "Afghanistan", "Bangladesh",
+            "Australia", "England", "New Zealand", "South Africa",
+            "West Indies", "Zimbabwe", "Ireland", "Netherlands",
+            "United Arab Emirates", "UAE", "Nepal", "Oman", "Scotland",
+        ]
+        country = next((name for name in known_countries if name.lower() in lower_query), None)
+        country_filter = "United Arab Emirates" if country == "UAE" else country
+
+        if asks_for_cities and country_filter:
+            country_value = _sql_literal(country_filter)
+            return (
+                "SELECT c.CityName, COUNT(*) AS stadiums "
+                "FROM ground g "
+                "LEFT JOIN city c ON g.CityId = c.CityId "
+                "LEFT JOIN country co ON COALESCE(g.CountryCode, c.CountryCode) = co.CountryCode "
+                f"WHERE co.CountryName LIKE '%{country_value}%' "
+                "GROUP BY c.CityName ORDER BY stadiums DESC LIMIT 50"
+            )
+
+        if asks_for_countries or not country_filter:
+            return (
+                "SELECT COALESCE(co.CountryName, 'Unknown') AS CountryName, COUNT(*) AS stadiums "
+                "FROM ground g "
+                "LEFT JOIN country co ON g.CountryCode = co.CountryCode "
+                "GROUP BY COALESCE(co.CountryName, 'Unknown') "
+                "ORDER BY stadiums DESC LIMIT 50"
+            )
+
+        country_value = _sql_literal(country_filter)
+        return (
+            "SELECT g.GroundName, c.CityName, co.CountryName "
+            "FROM ground g "
+            "LEFT JOIN city c ON g.CityId = c.CityId "
+            "LEFT JOIN country co ON COALESCE(g.CountryCode, c.CountryCode) = co.CountryCode "
+            f"WHERE co.CountryName LIKE '%{country_value}%' "
+            "ORDER BY c.CityName, g.GroundName LIMIT 50"
+        )
+
+    leaderboard_words = ["most", "more", "highest", "top", "leading", "maximum"]
+
+    asks_for_leaderboard = any(word in lower_query for word in leaderboard_words)
+    asks_for_runs = re.search(r"\bruns?\b", lower_query) is not None
+    asks_for_wickets = re.search(r"\bwickets?\b", lower_query) is not None
+    asks_for_maidens = re.search(r"\bmaiden(?:s| overs?)?\b", lower_query) is not None
+
+    if not asks_for_leaderboard or not (asks_for_runs or asks_for_wickets or asks_for_maidens):
+        return ""
+
+    limit_match = re.search(r"\btop\s+(\d{1,2})\b", lower_query)
+    limit = min(int(limit_match.group(1)), 50) if limit_match else 10
+
+    filters = []
+
+    if re.search(r"\b(icc|international|icc[- ]?recognised|icc[- ]?recognized)\b", lower_query):
+        filters.append("ICC = '1'")
+
+    season_match = re.search(r"\b(19|20)\d{2}\b", lower_query)
+    if season_match:
+        filters.append(f"Season = '{season_match.group(0)}'")
+
+    format_map = {
+        "t20": "T20",
+        "t20i": "T20",
+        "odi": "ODI",
+        "one day": "One Day",
+        "test": "Test",
+    }
+    for phrase, db_format in format_map.items():
+        if re.search(rf"\b{re.escape(phrase)}\b", lower_query):
+            filters.append(f"Format = '{db_format}'")
+            break
+
+    where_clause = f" WHERE {' AND '.join(filters)}" if filters else ""
+
+    if asks_for_maidens:
+        detail_filters = ["Maiden > 0"]
+        season_filter = next((item for item in filters if item.startswith("Season = ")), None)
+        format_filter = next((item for item in filters if item.startswith("Format = ")), None)
+
+        if season_filter or format_filter:
+            match_filters = []
+            if season_filter:
+                match_filters.append(f"m.{season_filter}")
+            if format_filter:
+                match_filters.append(f"m.{format_filter}")
+            return (
+                "SELECT bd.BowlerName, SUM(bd.Maiden) AS total_maidens, "
+                "COUNT(DISTINCT bd.MatchNo) AS matches "
+                "FROM bowling_detail bd "
+                "JOIN matches m ON bd.MatchNo = m.MatchNo "
+                f"WHERE bd.Maiden > 0 AND {' AND '.join(match_filters)} "
+                f"GROUP BY bd.BowlerName ORDER BY total_maidens DESC LIMIT {limit}"
+            )
+
+        return (
+            "SELECT BowlerName, SUM(Maiden) AS total_maidens, "
+            "COUNT(DISTINCT MatchNo) AS matches "
+            "FROM bowling_detail "
+            f"WHERE {' AND '.join(detail_filters)} "
+            f"GROUP BY BowlerName ORDER BY total_maidens DESC LIMIT {limit}"
+        )
+
+    if asks_for_wickets and not asks_for_runs:
+        return (
+            "SELECT PlayerName, SUM(Wickets) AS total_wickets, SUM(Matches) AS matches "
+            f"FROM bowling_stats{where_clause} "
+            f"GROUP BY PlayerName ORDER BY total_wickets DESC LIMIT {limit}"
+        )
+
+    return (
+        "SELECT PlayerName, SUM(Runs) AS total_runs, SUM(Matches) AS matches "
+        f"FROM batting_stats{where_clause} "
+        f"GROUP BY PlayerName ORDER BY total_runs DESC LIMIT {limit}"
+    )
+
 def generate_sql(query: str) -> str:
     """
     Calls Groq API to convert a natural language query into SQL.
     """
     try:
         logger.debug(f"Generating SQL for: {query}")
+
+        known_sql = generate_known_sql(query)
+        if known_sql:
+            logger.info(f"Generated deterministic SQL: {known_sql}")
+            return known_sql
+
         client = Groq(api_key=settings.GROQ_API_KEY) if settings.GROQ_API_KEY else None
         if not client:
              logger.error("Groq API key not found. Cannot generate SQL.")

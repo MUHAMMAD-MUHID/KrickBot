@@ -5,6 +5,8 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import './App.css';
 
+const API_BASE_URL = 'http://localhost:8001';
+
 function App() {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
@@ -18,7 +20,7 @@ function App() {
 
   const fetchSessions = async () => {
     try {
-      const res = await fetch('http://localhost:8000/chats');
+      const res = await fetch(`${API_BASE_URL}/chats`);
       if (res.ok) {
         const data = await res.json();
         setSessions(data);
@@ -36,7 +38,7 @@ function App() {
   // Fetch chat history on load if session exists
   useEffect(() => {
     if (sessionId) {
-      fetch(`http://localhost:8000/chat/${sessionId}`)
+      fetch(`${API_BASE_URL}/chat/${sessionId}`)
         .then(res => res.ok ? res.json() : null)
         .then(data => {
           if (data && data.messages) {
@@ -77,7 +79,7 @@ function App() {
     setIsLoading(true);
 
     try {
-      const res = await fetch('http://localhost:8000/chat', {
+      const res = await fetch(`${API_BASE_URL}/chat`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -96,7 +98,7 @@ function App() {
         localStorage.setItem('sessionId', data.session_id);
       }
       
-      const historyRes = await fetch(`http://localhost:8000/chat/${data.session_id}`);
+      const historyRes = await fetch(`${API_BASE_URL}/chat/${data.session_id}`);
       if (historyRes.ok) {
         const historyData = await historyRes.json();
         if (historyData && historyData.messages) {
@@ -150,7 +152,7 @@ function App() {
     
     // Truncate backend history
     try {
-      await fetch(`http://localhost:8000/chat/${sessionId}/truncate/${messageId}`, {
+      await fetch(`${API_BASE_URL}/chat/${sessionId}/truncate/${messageId}`, {
         method: 'DELETE'
       });
     } catch (e) {
