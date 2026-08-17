@@ -234,18 +234,19 @@ CREATE TABLE ball_by_ball (
 SCHEMA_NOTES = """
 ### Important Notes:
 - The `Season` column is a VARCHAR like '2019', '2020'. Do NOT use YEAR(Dated) to filter by year; use `Season = '2019'` or `WHERE matches.Season = '2019'`.
+- WARNING: The `Season` column ONLY exists in `matches`, `batting_stats`, `bowling_stats`, and `team` tables. It does NOT exist in `batting_detail` or `bowling_detail` or `player`.
 - `matches.Winner` is a TeamId (int FK). `matches.WinnerName` is the denormalized team name (varchar). Use WinnerName for display.
 - `matches.Team1Name` and `matches.Team2Name` are denormalized team names. You usually don't need to JOIN team table.
 - `batting_detail.BatsmanName` and `bowling_detail.BowlerName` are denormalized. You usually don't need to JOIN player table.
 - For "who won the most matches", COUNT matches grouped by WinnerName.
-- For "highest scorer", use batting_detail or batting_stats.
+- For "highest scorer", use batting_detail or batting_stats. WARNING: `HS` (Highest Score) ONLY exists in `batting_stats`. Do NOT select `HS` from `batting_detail`.
 - For "best bowler", use bowling_detail (match-level) or bowling_stats (aggregated).
 - `batting_stats` and `bowling_stats` are pre-aggregated per player per season. Use these for season-level stats.
 - CRITICAL: NEVER use UNION between batting_stats and bowling_stats — they have different column counts and UNION will always fail. Pick ONE table based on the question.
 - CRITICAL: NEVER JOIN batting_stats with bowling_stats — they share column names (PlayerName, Runs, Season) causing ambiguity errors. Query them separately.
 - If the user asks about a player's "stats" or "achievements" without specifying batting or bowling, query batting_stats ONLY (batting is the default).
 - If the user asks specifically about bowling/wickets, query bowling_stats ONLY.
-- Use LIKE '%name%' for player name searches since names may not match exactly. Correct obvious misspellings of famous players (e.g. 'baber azam' -> 'Babar Azam') before putting them in the LIKE clause.
+- FUZZY MATCHING CRITICAL RULE: For text searches (PlayerName, WinnerName), ALWAYS use `LIKE '%part_of_name%'` instead of `=`. If a name has multiple words (e.g. 'Babar Azam' or 'S. Afridi'), replace spaces and punctuation with `%` (e.g. `LIKE '%Babar%Azam%'` or `LIKE '%S%Afridi%'`) to catch typos or initials.
 
 ### Example Queries:
 Q: "Who won the most matches in 2019?"
@@ -271,7 +272,7 @@ SQL: SELECT PlayerName, Season, Matches, Wickets, Average, Economy, BBI FROM bow
 """
 
 
-def build_prompt(user_query: str) -> str:
+def build_prompt(user_query: str, error_feedback: str = None) -> str:
     """Constructs a rich prompt with schema, notes, and examples for accurate SQL generation."""
     prompt = f"""### Task
 Generate a SQL query to answer [QUESTION]{user_query}[/QUESTION]
@@ -288,14 +289,17 @@ This query will run on a database whose schema is represented in this string:
 {SCHEMA_CONTEXT}
 
 {SCHEMA_NOTES}
+"""
+    if error_feedback:
+        prompt += f"\n### Feedback from previous attempt\n{error_feedback}\n\n"
 
-### Answer
+    prompt += f"""### Answer
 Given the database schema, here is the SQL query that answers [QUESTION]{user_query}[/QUESTION]
 [SQL]
 """
     return prompt
 
-def generate_sql(query: str) -> str:
+def generate_sql(query: str, error_feedback: str = None) -> str:
     """
     Calls Groq API to convert a natural language query into SQL.
     """
@@ -306,7 +310,7 @@ def generate_sql(query: str) -> str:
              logger.error("Groq API key not found. Cannot generate SQL.")
              return ""
              
-        prompt = build_prompt(query)
+        prompt = build_prompt(query, error_feedback)
         
         completion = client.chat.completions.create(
             model="llama-3.1-8b-instant",
@@ -403,17 +407,50 @@ def execute_sql(sql: str) -> list[dict]:
     finally:
         db.close()
 
-def answer_factual_query(query: str) -> dict:
+def answer_factual_query(query: str, max_retries: int = 3) -> dict:
     """
     Master function: takes a user question, generates SQL, validates, executes, and returns results.
+    Includes a self-correction loop to recover from SQL errors or empty results due to strict matching.
     """
-    sql = generate_sql(query)
+    error_feedback = None
     
-    if not sql:
-        return {"query": query, "sql": None, "results": [], "error": "Failed to generate SQL."}
+    for attempt in range(max_retries):
+        sql = generate_sql(query, error_feedback)
         
-    results = execute_sql(sql)
-    
+        if not sql:
+            return {"query": query, "sql": None, "results": [], "error": "Failed to generate SQL."}
+            
+        results = execute_sql(sql)
+        
+        # If there's an error, we provide feedback and retry
+        if results and "error" in results[0]:
+            db_error = results[0]["error"]
+            logger.warning(f"SQL execution failed on attempt {attempt+1}: {db_error}. Retrying...")
+            error_feedback = (
+                f"Your previous query:\n{sql}\nFailed with error: {db_error}\n"
+                "Please fix the query and try again. Make sure you only query columns that exist in the table you are querying."
+            )
+            continue
+            
+        # If it returns 0 rows, it might be due to strict string matching
+        if not results:
+            logger.warning(f"SQL returned 0 rows on attempt {attempt+1}. Retrying with broader search...")
+            error_feedback = (
+                f"Your previous query:\n{sql}\nReturned 0 results. "
+                "This often happens because of strict string matching or typos. "
+                "Please rewrite the query using a broader LIKE clause for text fields (e.g. use LIKE '%Part1%Part2%'). "
+                "Also ensure you are querying the correct table (e.g. check batting_stats vs bowling_stats)."
+            )
+            continue
+            
+        # Success!
+        return {
+            "query": query,
+            "sql": sql,
+            "results": results
+        }
+        
+    # If we exhaust retries and still have an error/no data, return the last result
     return {
         "query": query,
         "sql": sql,
